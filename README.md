@@ -186,7 +186,14 @@ Disposable Windows install/uninstall checks are gated in the same way as Phase 5
 ```
 
 See [the release checklist](docs/release-checklist.md), [privacy notice](docs/privacy.md),
-[security model](docs/security.md), and [third-party license notes](docs/third-party-licenses.md).
+[security policy](.github/SECURITY.md), [security model](docs/security.md),
+[v0.1.0 release notes](docs/releases/v0.1.0.md), and
+[third-party license notes](docs/third-party-licenses.md).
+
+## License
+
+SysMind AI is licensed under the [MIT License](LICENSE). Third-party components retain their own
+licenses and required notices.
 
 ## Directory guide
 

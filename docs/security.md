@@ -38,5 +38,7 @@ Downgrades are unsupported because database migrations are forward-only.
 ## Vulnerability handling
 
 Do not include API keys, session tokens, unredacted logs, or personal diagnostic exports in a report.
-Until a public security contact is established, use the repository host's private security-advisory
-channel. Public release is blocked if no private reporting channel is configured.
+Use the repository's enabled
+[GitHub private vulnerability-reporting channel](https://github.com/lanmaolanglang-ops/SysMind-AI/security/advisories/new).
+Do not open a public issue for a suspected vulnerability. The contributor-facing reporting policy is
+published in [`.github/SECURITY.md`](../.github/SECURITY.md).
