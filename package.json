@@ -1,0 +1,15 @@
+{
+  "name": "sysmind-ai",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "pnpm --filter @sysmind/desktop dev",
+    "desktop": "pnpm --filter @sysmind/desktop tauri dev",
+    "lint": "pnpm --filter @sysmind/desktop lint",
+    "typecheck": "pnpm --filter @sysmind/desktop typecheck",
+    "test": "pnpm --filter @sysmind/desktop test",
+    "build": "pnpm --filter @sysmind/desktop build"
+  }
+}
+

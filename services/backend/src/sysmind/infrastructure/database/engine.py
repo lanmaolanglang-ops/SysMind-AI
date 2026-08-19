@@ -1,0 +1,19 @@
+from __future__ import annotations
+
+from sqlalchemy import Engine, create_engine, event
+
+
+def create_database_engine(database_url: str) -> Engine:
+    engine = create_engine(database_url, future=True)
+
+    @event.listens_for(engine, "connect")
+    def configure_sqlite(dbapi_connection: object, _connection_record: object) -> None:
+        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA journal_mode=WAL")
+        finally:
+            cursor.close()
+
+    return engine
+

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">SysMind AI</title>
+  <rect width="512" height="512" rx="112" fill="#246340"/>
+  <path
+    d="M351 158c-25-22-60-34-99-34-63 0-108 32-108 79 0 43 28 66 94 81 47 11 62 21 62 42 0 22-21 36-54 36-38 0-73-14-101-40l-39 48c36 34 85 52 138 52 69 0 118-36 118-89 0-46-29-69-96-85-45-10-60-19-60-38 0-18 18-30 47-30 31 0 59 10 84 30l34-52Z"
+    fill="#F7FAF5"
+  />
+  <circle cx="384" cy="132" r="28" fill="#B9D7BC"/>
+</svg>

@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-19T20:32:14+08:00",
+  "title": "Design System: SysMind AI",
+  "extensions": {
+    "colorMeta": {
+      "accent-green": { "role": "primary", "displayName": "Local Green", "canonical": "#246340" },
+      "canvas-mist": { "role": "neutral", "displayName": "Canvas Mist", "canonical": "#edf0eb" },
+      "surface-white": { "role": "neutral", "displayName": "Surface White", "canonical": "#fafbf8" },
+      "text-strong": { "role": "neutral", "displayName": "Strong Ink", "canonical": "#1a241f" },
+      "text-body": { "role": "neutral", "displayName": "Body Slate", "canonical": "#56625b" },
+      "status-starting": { "role": "tertiary", "displayName": "Starting Amber", "canonical": "#b07323" },
+      "status-connected": { "role": "tertiary", "displayName": "Connected Green", "canonical": "#26824a" },
+      "status-error": { "role": "tertiary", "displayName": "Error Red", "canonical": "#b53c36" },
+      "action-error": { "role": "tertiary", "displayName": "Action Red", "canonical": "#8e302c" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Workspace Display", "purpose": "The Phase 0 workspace title." },
+      "title": { "displayName": "State Title", "purpose": "Runtime connection-state headings." },
+      "body": { "displayName": "Body", "purpose": "Introductory and recovery copy." },
+      "label": { "displayName": "Utility Label", "purpose": "Phase, metadata, and compact status text." },
+      "mono": { "displayName": "Correlation ID", "purpose": "Optional support identifiers only." }
+    },
+    "shadows": [
+      {
+        "name": "runtime-panel",
+        "value": "0 22px 52px rgba(36, 52, 43, 0.13)",
+        "purpose": "The sole structural lift, reserved for the runtime panel."
+      }
+    ],
+    "motion": [
+      {
+        "name": "status-pulse",
+        "value": "1.4s ease-in-out infinite",
+        "purpose": "Starting-state status mark pulse; reduced-motion rules collapse it."
+      },
+      {
+        "name": "activity",
+        "value": "1.5s cubic-bezier(0.2, 0.8, 0.2, 1) infinite",
+        "purpose": "Starting-state activity line; reduced-motion rules collapse it."
+      }
+    ],
+    "breakpoints": [
+      { "name": "single-column", "value": "760px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Brand Symbol",
+      "kind": "custom",
+      "refersTo": "brand-symbol",
+      "description": "Provisional lettermark used in the Phase 0 top bar.",
+      "html": "<span class=\"ds-brand-symbol\" aria-hidden=\"true\">S</span>",
+      "css": ".ds-brand-symbol { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: #f5faf6; background: #246340; font: 750 14px/1 \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; }"
+    },
+    {
+      "name": "Disconnected Chip",
+      "kind": "chip",
+      "refersTo": "connection-chip",
+      "description": "Compact text-plus-mark indicator for a disconnected backend.",
+      "html": "<span class=\"ds-connection-chip\" role=\"status\"><span class=\"ds-status-mark\" aria-hidden=\"true\"></span>Backend Disconnected</span>",
+      "css": ".ds-connection-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; color: #48534d; background: rgba(255,255,255,.7); font: 650 12px/1.2 \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; } .ds-status-mark { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #b53c36; }"
+    },
+    {
+      "name": "Starting Activity Line",
+      "kind": "custom",
+      "description": "Indeterminate activity indicator shown while the local backend starts.",
+      "html": "<div class=\"ds-activity-line\" aria-hidden=\"true\"><span></span></div>",
+      "css": ".ds-activity-line { position: relative; width: 100%; height: 3px; overflow: hidden; border-radius: 3px; background: #dfe5df; } .ds-activity-line span { position: absolute; inset: 0 auto 0 0; width: 34%; border-radius: inherit; background: #246340; animation: ds-activity 1.5s cubic-bezier(.2,.8,.2,1) infinite; } @keyframes ds-activity { from { transform: translateX(-110%); } to { transform: translateX(310%); } } @media (prefers-reduced-motion: reduce) { .ds-activity-line span { animation-duration: .01ms; animation-iteration-count: 1; } }"
+    },
+    {
+      "name": "Runtime Panel",
+      "kind": "card",
+      "refersTo": "runtime-panel",
+      "description": "The single elevated surface that contains the active backend state.",
+      "html": "<section class=\"ds-runtime-panel\"><h2>本地后端未连接</h2><p>无法读取本地后端启动状态。</p></section>",
+      "css": ".ds-runtime-panel { min-height: 230px; padding: clamp(30px,4vw,48px); border-radius: 16px; color: #1a241f; background: #fafbf8; box-shadow: 0 22px 52px rgba(36,52,43,.13); font-family: \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; } .ds-runtime-panel h2 { margin: 0 0 14px; font-size: 23px; line-height: 1.2; letter-spacing: -.02em; } .ds-runtime-panel p { margin: 0; color: #5c6761; line-height: 1.65; }"
+    },
+    {
+      "name": "Reconnect Button",
+      "kind": "button",
+      "refersTo": "reconnect-button",
+      "description": "The observed recovery action for a disconnected local backend.",
+      "html": "<button class=\"ds-reconnect-button\" type=\"button\">重新连接</button>",
+      "css": ".ds-reconnect-button { padding: 10px 16px; border: 0; border-radius: 10px; color: #fff; background: #8e302c; cursor: pointer; font: 650 16px/1.2 \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; } .ds-reconnect-button:hover { background: #762723; } .ds-reconnect-button:focus-visible { outline: 3px solid #246340; outline-offset: 3px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Calm Local Utility",
+    "overview": "This is a provisional Phase 0 shell, not a finished brand system. Its current visual language is quiet, spacious, and operational: a muted green-gray canvas, one restrained green accent, a single elevated runtime panel, and plain-language connection feedback.\n\nThe implementation communicates local safety and service readiness without suggesting diagnostic capabilities that do not yet exist. The reviewed desktop and narrow layouts both use the same hierarchy and state vocabulary; the final review disposition is Pass after contrast fixes.",
+    "keyCharacteristics": [
+      "Warm neutral surfaces with a restrained green accent.",
+      "Large, direct Chinese display copy paired with compact technical metadata.",
+      "Connection state is always expressed with both text and a colored mark.",
+      "One centered runtime panel carries the active system state.",
+      "Generous spacing keeps this foundation screen calm and legible."
+    ],
+    "rules": [
+      { "name": "The Semantic Status Rule", "body": "Status color is always accompanied by a written state; color never carries connection meaning alone.", "section": "colors" },
+      { "name": "The Single Lift Rule", "body": "Reserve the established shadow for the runtime panel; all other observed surfaces remain flat or translucent.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep this document provisional until later phases establish a broader visual language.",
+      "Do pair every connection color with explicit state text.",
+      "Do preserve the single-panel hierarchy and readable desktop-to-mobile stacking for this Phase 0 shell.",
+      "Do honor reduced-motion preferences for the starting indicators."
+    ],
+    "donts": [
+      "Don't infer navigation, input fields, diagnostic dashboards, or future repair interfaces from this foundation screen.",
+      "Don't treat the temporary ‘S’ symbol as a finalized logo or the current palette as a complete brand identity.",
+      "Don't add unobserved component variants to the documented system."
+    ]
+  }
+}

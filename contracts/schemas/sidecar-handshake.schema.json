@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sysmind.ai/contracts/sidecar-handshake.schema.json",
+  "title": "SysMind sidecar endpoint handshake",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event", "host", "port", "backend_version", "api_version"],
+  "properties": {
+    "event": { "const": "sysmind_endpoint" },
+    "host": { "const": "127.0.0.1" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "backend_version": { "type": "string", "minLength": 1 },
+    "api_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }
+  }
+}
+
