@@ -25,10 +25,326 @@
           }
         }
       }
+    },
+    "/api/v1/scans/quick": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Start Quick Scan",
+        "operationId": "start_quick_scan_api_v1_scans_quick_post",
+        "parameters": [
+          {
+            "name": "X-Correlation-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Correlation-Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Recent Scans",
+        "operationId": "recent_scans_api_v1_scans_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}": {
+      "get": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Get Scan",
+        "operationId": "get_scan_api_v1_scans__scan_id__get",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scans/{scan_id}/cancel": {
+      "post": {
+        "tags": [
+          "scans"
+        ],
+        "summary": "Cancel Scan",
+        "operationId": "cancel_scan_api_v1_scans__scan_id__cancel_post",
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "CapabilityDto": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "available"
+        ],
+        "title": "CapabilityDto"
+      },
+      "CpuDto": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "physical_cores": {
+            "type": "integer",
+            "title": "Physical Cores"
+          },
+          "logical_cores": {
+            "type": "integer",
+            "title": "Logical Cores"
+          },
+          "utilization_percent": {
+            "type": "number",
+            "title": "Utilization Percent"
+          },
+          "frequency_mhz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frequency Mhz"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "physical_cores",
+          "logical_cores",
+          "utilization_percent",
+          "frequency_mhz"
+        ],
+        "title": "CpuDto"
+      },
+      "DiskDto": {
+        "properties": {
+          "volume": {
+            "type": "string",
+            "title": "Volume"
+          },
+          "mountpoint": {
+            "type": "string",
+            "title": "Mountpoint"
+          },
+          "filesystem": {
+            "type": "string",
+            "title": "Filesystem"
+          },
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes"
+          },
+          "free_bytes": {
+            "type": "integer",
+            "title": "Free Bytes"
+          },
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes"
+          },
+          "utilization_percent": {
+            "type": "number",
+            "title": "Utilization Percent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "volume",
+          "mountpoint",
+          "filesystem",
+          "total_bytes",
+          "free_bytes",
+          "used_bytes",
+          "utilization_percent"
+        ],
+        "title": "DiskDto"
+      },
+      "GpuDto": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "memory_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Bytes"
+          },
+          "driver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Driver Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "memory_bytes",
+          "driver_version"
+        ],
+        "title": "GpuDto"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
       "HealthResponse": {
         "properties": {
           "status": {
@@ -58,7 +374,334 @@
           "ready"
         ],
         "title": "HealthResponse"
+      },
+      "MemoryDto": {
+        "properties": {
+          "total_bytes": {
+            "type": "integer",
+            "title": "Total Bytes"
+          },
+          "available_bytes": {
+            "type": "integer",
+            "title": "Available Bytes"
+          },
+          "used_bytes": {
+            "type": "integer",
+            "title": "Used Bytes"
+          },
+          "utilization_percent": {
+            "type": "number",
+            "title": "Utilization Percent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_bytes",
+          "available_bytes",
+          "used_bytes",
+          "utilization_percent"
+        ],
+        "title": "MemoryDto"
+      },
+      "OperatingSystemDto": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "build": {
+            "type": "string",
+            "title": "Build"
+          },
+          "architecture": {
+            "type": "string",
+            "title": "Architecture"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "build",
+          "architecture"
+        ],
+        "title": "OperatingSystemDto"
+      },
+      "ProcessDto": {
+        "properties": {
+          "pid": {
+            "type": "integer",
+            "title": "Pid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "cpu_percent": {
+            "type": "number",
+            "title": "Cpu Percent"
+          },
+          "memory_bytes": {
+            "type": "integer",
+            "title": "Memory Bytes"
+          },
+          "memory_percent": {
+            "type": "number",
+            "title": "Memory Percent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pid",
+          "name",
+          "cpu_percent",
+          "memory_bytes",
+          "memory_percent"
+        ],
+        "title": "ProcessDto"
+      },
+      "ScanFailureDto": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool",
+          "code",
+          "message"
+        ],
+        "title": "ScanFailureDto"
+      },
+      "ScanListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScanResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ScanListResponse"
+      },
+      "ScanResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "partial",
+              "cancelled",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "progress": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScanSummaryDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/ScanFailureDto"
+            },
+            "type": "array",
+            "title": "Failures"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "progress",
+          "current_step",
+          "started_at",
+          "finished_at",
+          "summary",
+          "failures",
+          "schema_version"
+        ],
+        "title": "ScanResponse"
+      },
+      "ScanSummaryDto": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityDto"
+            },
+            "type": "array",
+            "title": "Capabilities"
+          },
+          "operating_system": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperatingSystemDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cpu": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CpuDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gpus": {
+            "items": {
+              "$ref": "#/components/schemas/GpuDto"
+            },
+            "type": "array",
+            "title": "Gpus"
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disks": {
+            "items": {
+              "$ref": "#/components/schemas/DiskDto"
+            },
+            "type": "array",
+            "title": "Disks"
+          },
+          "processes": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessDto"
+            },
+            "type": "array",
+            "title": "Processes"
+          },
+          "high_usage_processes": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessDto"
+            },
+            "type": "array",
+            "title": "High Usage Processes"
+          }
+        },
+        "type": "object",
+        "title": "ScanSummaryDto"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
       }
     }
   }
-}
+}

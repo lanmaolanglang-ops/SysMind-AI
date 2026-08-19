@@ -1,114 +1,148 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-19T20:32:14+08:00",
+  "generatedAt": "2026-08-19T21:30:00+08:00",
   "title": "Design System: SysMind AI",
   "extensions": {
     "colorMeta": {
-      "accent-green": { "role": "primary", "displayName": "Local Green", "canonical": "#246340" },
-      "canvas-mist": { "role": "neutral", "displayName": "Canvas Mist", "canonical": "#edf0eb" },
-      "surface-white": { "role": "neutral", "displayName": "Surface White", "canonical": "#fafbf8" },
-      "text-strong": { "role": "neutral", "displayName": "Strong Ink", "canonical": "#1a241f" },
-      "text-body": { "role": "neutral", "displayName": "Body Slate", "canonical": "#56625b" },
-      "status-starting": { "role": "tertiary", "displayName": "Starting Amber", "canonical": "#b07323" },
-      "status-connected": { "role": "tertiary", "displayName": "Connected Green", "canonical": "#26824a" },
-      "status-error": { "role": "tertiary", "displayName": "Error Red", "canonical": "#b53c36" },
-      "action-error": { "role": "tertiary", "displayName": "Action Red", "canonical": "#8e302c" }
+      "local-green": {
+        "role": "primary",
+        "displayName": "Local Green",
+        "canonical": "#246340",
+        "tonalRamp": ["#0f2b1c", "#194e31", "#246340", "#527961", "#7f9b88", "#adbdaf", "#d8e0d9", "#f4f7f4"]
+      },
+      "canvas-mist": {
+        "role": "neutral",
+        "displayName": "Canvas Mist",
+        "canonical": "#edf0eb",
+        "tonalRamp": ["#202420", "#414841", "#626a62", "#858d85", "#aab1aa", "#cdd2cd", "#edf0eb", "#f8faf7"]
+      },
+      "surface-white": {
+        "role": "neutral",
+        "displayName": "Surface White",
+        "canonical": "#fafbf8",
+        "tonalRamp": ["#242623", "#484b47", "#6d716b", "#92968f", "#b8bbb5", "#dcded9", "#fafbf8", "#ffffff"]
+      },
+      "text-strong": {
+        "role": "neutral",
+        "displayName": "Strong Ink",
+        "canonical": "#1a241f",
+        "tonalRamp": ["#0c120f", "#1a241f", "#35423a", "#526159", "#748178", "#9aa49d", "#c2c9c3", "#edf0eb"]
+      },
+      "status-connected": {
+        "role": "tertiary",
+        "displayName": "Connected Green",
+        "canonical": "#26824a",
+        "tonalRamp": ["#082617", "#12472a", "#1c663b", "#26824a", "#53a16d", "#82bd93", "#b5d8bd", "#e7f2e9"]
+      },
+      "status-starting": {
+        "role": "tertiary",
+        "displayName": "Starting Amber",
+        "canonical": "#b07323",
+        "tonalRamp": ["#2b1905", "#54320b", "#7d4d14", "#a86c20", "#c99450", "#dfb984", "#efdbbc", "#faf2e5"]
+      },
+      "status-error": {
+        "role": "tertiary",
+        "displayName": "Error Red",
+        "canonical": "#b53c36",
+        "tonalRamp": ["#310a09", "#5b1714", "#842722", "#ad3b35", "#ca6861", "#df9792", "#efc5c2", "#faecea"]
+      }
     },
     "typographyMeta": {
-      "display": { "displayName": "Workspace Display", "purpose": "The Phase 0 workspace title." },
-      "title": { "displayName": "State Title", "purpose": "Runtime connection-state headings." },
-      "body": { "displayName": "Body", "purpose": "Introductory and recovery copy." },
-      "label": { "displayName": "Utility Label", "purpose": "Phase, metadata, and compact status text." },
-      "mono": { "displayName": "Correlation ID", "purpose": "Optional support identifiers only." }
+      "display": { "displayName": "Device Display", "purpose": "The device overview title only." },
+      "title": { "displayName": "Scan Title", "purpose": "Primary scan purpose and runtime headings." },
+      "body": { "displayName": "Plain-language Body", "purpose": "Safety, progress, and result explanations." },
+      "label": { "displayName": "Evidence Label", "purpose": "Connection state, field labels, and compact metrics." }
     },
     "shadows": [
       {
-        "name": "runtime-panel",
+        "name": "single-operational-lift",
         "value": "0 22px 52px rgba(36, 52, 43, 0.13)",
-        "purpose": "The sole structural lift, reserved for the runtime panel."
+        "purpose": "Reserved for the one primary scan surface."
       }
     ],
     "motion": [
       {
         "name": "status-pulse",
         "value": "1.4s ease-in-out infinite",
-        "purpose": "Starting-state status mark pulse; reduced-motion rules collapse it."
+        "purpose": "Starting-state mark only; reduced-motion collapses it."
       },
       {
         "name": "activity",
         "value": "1.5s cubic-bezier(0.2, 0.8, 0.2, 1) infinite",
-        "purpose": "Starting-state activity line; reduced-motion rules collapse it."
+        "purpose": "Indeterminate backend startup line only."
       }
     ],
     "breakpoints": [
-      { "name": "single-column", "value": "760px" }
+      { "name": "narrow-window", "value": "760px" }
     ]
   },
   "components": [
     {
-      "name": "Brand Symbol",
-      "kind": "custom",
-      "refersTo": "brand-symbol",
-      "description": "Provisional lettermark used in the Phase 0 top bar.",
-      "html": "<span class=\"ds-brand-symbol\" aria-hidden=\"true\">S</span>",
-      "css": ".ds-brand-symbol { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 9px; color: #f5faf6; background: #246340; font: 750 14px/1 \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; }"
+      "name": "Primary Scan Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Starts or repeats the read-only quick scan.",
+      "html": "<button class='ds-primary'>开始扫描</button>",
+      "css": ".ds-primary{border:0;border-radius:10px;padding:11px 18px;color:#fff;background:#246340;font:700 16px/1.2 \"Segoe UI Variable Text\",\"Segoe UI\",system-ui,sans-serif}.ds-primary:hover{background:#194e31}.ds-primary:focus-visible{outline:3px solid #246340;outline-offset:3px}.ds-primary:disabled{cursor:wait;opacity:.65}"
     },
     {
-      "name": "Disconnected Chip",
+      "name": "Local Service Chip",
       "kind": "chip",
       "refersTo": "connection-chip",
-      "description": "Compact text-plus-mark indicator for a disconnected backend.",
-      "html": "<span class=\"ds-connection-chip\" role=\"status\"><span class=\"ds-status-mark\" aria-hidden=\"true\"></span>Backend Disconnected</span>",
-      "css": ".ds-connection-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; color: #48534d; background: rgba(255,255,255,.7); font: 650 12px/1.2 \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; } .ds-status-mark { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #b53c36; }"
+      "description": "Pairs local-service text with a semantic status mark.",
+      "html": "<span class='ds-chip'><i aria-hidden='true'></i>本地服务已连接</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border-radius:999px;color:#48534d;background:rgba(255,255,255,.7);font:700 12px/1.2 \"Segoe UI Variable Text\",\"Segoe UI\",system-ui,sans-serif}.ds-chip i{width:8px;height:8px;border-radius:50%;background:#26824a}"
     },
     {
-      "name": "Starting Activity Line",
-      "kind": "custom",
-      "description": "Indeterminate activity indicator shown while the local backend starts.",
-      "html": "<div class=\"ds-activity-line\" aria-hidden=\"true\"><span></span></div>",
-      "css": ".ds-activity-line { position: relative; width: 100%; height: 3px; overflow: hidden; border-radius: 3px; background: #dfe5df; } .ds-activity-line span { position: absolute; inset: 0 auto 0 0; width: 34%; border-radius: inherit; background: #246340; animation: ds-activity 1.5s cubic-bezier(.2,.8,.2,1) infinite; } @keyframes ds-activity { from { transform: translateX(-110%); } to { transform: translateX(310%); } } @media (prefers-reduced-motion: reduce) { .ds-activity-line span { animation-duration: .01ms; animation-iteration-count: 1; } }"
-    },
-    {
-      "name": "Runtime Panel",
+      "name": "Scan Surface",
       "kind": "card",
-      "refersTo": "runtime-panel",
-      "description": "The single elevated surface that contains the active backend state.",
-      "html": "<section class=\"ds-runtime-panel\"><h2>本地后端未连接</h2><p>无法读取本地后端启动状态。</p></section>",
-      "css": ".ds-runtime-panel { min-height: 230px; padding: clamp(30px,4vw,48px); border-radius: 16px; color: #1a241f; background: #fafbf8; box-shadow: 0 22px 52px rgba(36,52,43,.13); font-family: \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; } .ds-runtime-panel h2 { margin: 0 0 14px; font-size: 23px; line-height: 1.2; letter-spacing: -.02em; } .ds-runtime-panel p { margin: 0; color: #5c6761; line-height: 1.65; }"
+      "refersTo": "scan-panel",
+      "description": "The single lifted surface for scan action, progress, evidence, and warnings.",
+      "html": "<section class='ds-scan'><h2>了解这台电脑此刻的状态</h2><p>扫描不会修改设置，也不会结束任何进程。</p></section>",
+      "css": ".ds-scan{padding:34px 40px;border-radius:16px;color:#1a241f;background:#fafbf8;box-shadow:0 22px 52px rgba(36,52,43,.13);font-family:\"Segoe UI Variable Text\",\"Segoe UI\",system-ui,sans-serif}.ds-scan h2{margin:0 0 10px;font-size:30px;letter-spacing:-.025em}.ds-scan p{margin:0;color:#56625b;line-height:1.65}"
     },
     {
-      "name": "Reconnect Button",
-      "kind": "button",
-      "refersTo": "reconnect-button",
-      "description": "The observed recovery action for a disconnected local backend.",
-      "html": "<button class=\"ds-reconnect-button\" type=\"button\">重新连接</button>",
-      "css": ".ds-reconnect-button { padding: 10px 16px; border: 0; border-radius: 10px; color: #fff; background: #8e302c; cursor: pointer; font: 650 16px/1.2 \"Segoe UI Variable Text\", \"Segoe UI\", system-ui, sans-serif; } .ds-reconnect-button:hover { background: #762723; } .ds-reconnect-button:focus-visible { outline: 3px solid #246340; outline-offset: 3px; }"
+      "name": "Disk Meter",
+      "kind": "custom",
+      "description": "Visible disk text paired with semantic utilization.",
+      "html": "<div class='ds-disk'><span>C:\\</span><span>250 GB 可用 · 已用 54%</span><div role='meter' aria-label='C: 磁盘使用率' aria-valuemin='0' aria-valuemax='100' aria-valuenow='54'><i></i></div></div>",
+      "css": ".ds-disk{display:grid;grid-template-columns:90px 1fr 1.4fr;gap:20px;align-items:center;color:#1a241f;font:650 13px/1.4 \"Segoe UI\",system-ui,sans-serif}.ds-disk>span:nth-child(2){color:#5d6862;font-weight:400}.ds-disk>div{height:5px;border-radius:5px;background:#dfe5df}.ds-disk i{display:block;width:54%;height:100%;border-radius:inherit;background:#527961}"
+    },
+    {
+      "name": "Terminal Result Status",
+      "kind": "custom",
+      "description": "Text-plus-color completion state for the persisted result.",
+      "html": "<div class='ds-result' role='status'><i aria-hidden='true'></i><strong>扫描完成</strong><time>8/19 13:25</time></div>",
+      "css": ".ds-result{display:flex;align-items:center;gap:10px;padding:18px 0;border-bottom:1px solid #e5e9e4;color:#1a241f;font:700 14px/1.2 \"Segoe UI\",system-ui,sans-serif}.ds-result i{width:9px;height:9px;border-radius:50%;background:#26824a}.ds-result time{margin-left:auto;color:#5d6862;font-size:12px;font-weight:400}"
     }
   ],
   "narrative": {
     "northStar": "Calm Local Utility",
-    "overview": "This is a provisional Phase 0 shell, not a finished brand system. Its current visual language is quiet, spacious, and operational: a muted green-gray canvas, one restrained green accent, a single elevated runtime panel, and plain-language connection feedback.\n\nThe implementation communicates local safety and service readiness without suggesting diagnostic capabilities that do not yet exist. The reviewed desktop and narrow layouts both use the same hierarchy and state vocabulary; the final review disposition is Pass after contrast fixes.",
+    "overview": "SysMind AI uses familiar Windows typography, quiet green-gray surfaces, and one dominant evidence panel to make local diagnostics feel controlled rather than alarming. Phase 1 extends the original connection shell into an operational scan surface without becoming a dense monitoring dashboard.",
     "keyCharacteristics": [
-      "Warm neutral surfaces with a restrained green accent.",
-      "Large, direct Chinese display copy paired with compact technical metadata.",
-      "Connection state is always expressed with both text and a colored mark.",
-      "One centered runtime panel carries the active system state.",
-      "Generous spacing keeps this foundation screen calm and legible."
+      "One restrained green accent over warm neutral surfaces.",
+      "One lifted scan surface; internal evidence is separated by flat rows and dividers.",
+      "Large direct headings, compact metadata, and tabular numeric details.",
+      "Text accompanies every semantic color and progress state.",
+      "Narrow windows preserve the primary scan action and all evidence fields."
     ],
     "rules": [
-      { "name": "The Semantic Status Rule", "body": "Status color is always accompanied by a written state; color never carries connection meaning alone.", "section": "colors" },
-      { "name": "The Single Lift Rule", "body": "Reserve the established shadow for the runtime panel; all other observed surfaces remain flat or translucent.", "section": "elevation" }
+      { "name": "The Semantic Status Rule", "body": "Never communicate connection or scan state by color alone; pair every mark with explicit text.", "section": "colors" },
+      { "name": "The Quiet Canvas Rule", "body": "Canvas and panel neutrals own most of the screen. Green is reserved for state and action, not decoration.", "section": "colors" },
+      { "name": "The Evidence Can Wrap Rule", "body": "Hardware names and values wrap when necessary; they are never silently ellipsized.", "section": "typography" },
+      { "name": "The Single Lift Rule", "body": "One operational surface may float; evidence inside it uses spacing and dividers, never additional card shadows.", "section": "elevation" }
     ],
     "dos": [
-      "Do keep this document provisional until later phases establish a broader visual language.",
-      "Do pair every connection color with explicit state text.",
-      "Do preserve the single-panel hierarchy and readable desktop-to-mobile stacking for this Phase 0 shell.",
-      "Do honor reduced-motion preferences for the starting indicators."
+      "Do state that scans are local and read-only near the primary action.",
+      "Do keep status copy understandable to non-technical Windows users.",
+      "Do preserve evidence and show bounded per-collector failure.",
+      "Do honor keyboard focus and reduced-motion preferences."
     ],
     "donts": [
-      "Don't infer navigation, input fields, diagnostic dashboards, or future repair interfaces from this foundation screen.",
-      "Don't treat the temporary ‘S’ symbol as a finalized logo or the current palette as a complete brand identity.",
-      "Don't add unobserved component variants to the documented system."
+      "Don't turn system evidence into a grid of floating statistic cards.",
+      "Don't truncate hardware truth or hide metrics merely to simplify narrow layouts.",
+      "Don't add phase kickers, decorative sequence numbers, gradients, glass effects, or duplicate in-app branding.",
+      "Don't imply Agent, repair, process termination, or other capabilities that Phase 1 does not provide."
     ]
   }
 }

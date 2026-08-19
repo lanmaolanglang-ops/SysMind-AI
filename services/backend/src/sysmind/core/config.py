@@ -34,7 +34,10 @@ class Settings(BaseSettings):
     )
     data_dir: Path = Field(default_factory=default_data_dir)
     log_level: str = "INFO"
-    allowed_origins: str = "tauri://localhost,https://tauri.localhost,http://tauri.localhost,http://localhost:1420"
+    allowed_origins: str = (
+        "tauri://localhost,https://tauri.localhost,http://tauri.localhost,"
+        "http://localhost:1420,http://127.0.0.1:1420"
+    )
 
     @field_validator("host")
     @classmethod

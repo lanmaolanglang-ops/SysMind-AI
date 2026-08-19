@@ -26,6 +26,7 @@ export interface HealthResponse {
 export interface BackendConnection {
   endpoint: BackendEndpoint;
   health: HealthResponse;
+  client: ApiClient;
 }
 
 export class BackendConnectionError extends Error {
@@ -101,7 +102,7 @@ export async function connectToBackend(signal?: AbortSignal): Promise<BackendCon
         `本地后端尚未就绪或协议版本不兼容（${health.api_version}）。`,
       );
     }
-    return { endpoint, health };
+    return { endpoint, health, client };
   } catch (error: unknown) {
     if (error instanceof BackendConnectionError) throw error;
     if (error instanceof ApiClientError) {

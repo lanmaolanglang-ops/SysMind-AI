@@ -1,6 +1,6 @@
 # SysMind AI
 
-SysMind AI is a local-first Windows desktop foundation for an explainable computer diagnostic assistant. Phase 0 contains the desktop shell, authenticated local backend lifecycle, persistence foundation, and test/CI scaffolding. It does **not** inspect the computer, call an AI model, or change system state.
+SysMind AI is a local-first Windows desktop foundation for an explainable computer diagnostic assistant. Phase 1 adds an auditable, read-only quick scan for Windows, CPU, GPU, memory, disks, and current processes. It still does **not** call an AI model, execute model-authored commands, manage processes, or change system state.
 
 The product and architecture baseline is [docs/SysMind-AI-PRD-and-Architecture.md](docs/SysMind-AI-PRD-and-Architecture.md).
 
@@ -16,18 +16,31 @@ Tauri 2 process owner ───── starts/stops ───── Python FastAP
                                                     ▼
                                           SQLAlchemy 2 + SQLite
                                           Alembic migrations
+                                                    ▲
+                                                    │ inward-facing ports
+                                          Windows read-only adapters
 ```
 
 The Tauri process owns the exact child process it creates. On Windows, the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`; normal exit first requests graceful backend shutdown and only terminates that owned child after a timeout. A development launcher uses Python today and the same abstraction accepts a frozen executable later.
 
-## Phase 0 safety boundary
+## Current Phase 1 capabilities
+
+- Start, monitor, cancel, and revisit a local quick scan.
+- Collect normalized OS, CPU, GPU, memory, fixed-volume, process snapshot, and high-usage process evidence.
+- Preserve partial results when a collector is unavailable or times out.
+- Persist scan summaries and per-step audit events with collector name, version, timing, and safe error mapping.
+- Run fixture-based tests on every platform and real read-only Windows adapter/API smoke tests on Windows.
+
+## Safety boundary
 
 - The backend host is a validated literal `127.0.0.1`; `0.0.0.0` is rejected.
 - Every API request requires an ephemeral `X-SysMind-Session` token.
 - Browser/Tauri origins are allowlisted and correlation IDs cross the API boundary.
 - API keys are not implemented or persisted. `FakeSecretService` is memory-only.
 - Logs are structured JSON and redact common secret fields.
-- No system diagnostics, Agent, model provider, arbitrary command, or repair behavior exists.
+- Collectors are application-owned, versioned, timeout-bounded, and read-only.
+- GPU detection uses one fixed application-authored CIM query; no user or model input reaches PowerShell.
+- No Agent, model provider, Tool Registry, arbitrary command, process management, or repair behavior exists.
 
 ## Development requirements
 
@@ -111,6 +124,12 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
 Manual lifecycle checks are documented in [tests/integration/README.md](tests/integration/README.md).
 
+Run only the real Windows read-only smoke tests:
+
+```powershell
+& services/backend/.venv/Scripts/pytest.exe services/backend/tests/test_windows_diagnostics.py -m windows_smoke -vv
+```
+
 ## Directory guide
 
 ```text
@@ -118,11 +137,11 @@ apps/desktop/              React/Vite UI and Tauri 2 shell
 services/backend/          FastAPI application, infrastructure, migrations, tests
 contracts/openapi/         Generated local API contract
 contracts/schemas/         Non-HTTP process protocol schemas
-docs/adr/                  Accepted Phase 0 architecture decisions
+docs/adr/                  Accepted architecture decisions
 .impeccable/design.json    Machine-readable snapshot of the provisional UI system
 scripts/                   Development and contract utilities
 tests/integration/         Cross-process smoke-test scaffold
 .github/workflows/         CI quality gates and Windows smoke job
 ```
 
-Future diagnostic capabilities must follow `presentation -> application -> domain`, with infrastructure implementing inward-facing ports. Windows adapters, Tool Registry, Agent, and repair actions are intentionally deferred to later phases.
+The implemented dependency direction is `presentation -> application -> domain`; SQLAlchemy repositories and Windows adapters implement inward-facing ports. Tool Registry, Agent, model providers, state-changing process actions, and repairs remain deferred to later phases.

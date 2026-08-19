@@ -45,6 +45,10 @@ export class ApiClient {
     return this.#request<T>("GET", path, signal);
   }
 
+  async post<T>(path: string, signal?: AbortSignal): Promise<T> {
+    return this.#request<T>("POST", path, signal);
+  }
+
   async #request<T>(method: "GET" | "POST", path: string, signal?: AbortSignal): Promise<T> {
     const timeout = AbortSignal.timeout(this.#timeoutMs);
     const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -101,4 +105,3 @@ export class ApiClient {
     }
   }
 }
-

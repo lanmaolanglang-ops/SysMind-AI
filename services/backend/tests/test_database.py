@@ -16,7 +16,9 @@ def test_database_initialization_enables_safety_pragmas(settings: Settings) -> N
 
     assert foreign_keys == 1
     assert str(journal_mode).lower() == "wal"
-    assert "app_metadata" in inspect(engine).get_table_names()
+    assert {"app_metadata", "system_scans", "scan_step_events"}.issubset(
+        inspect(engine).get_table_names()
+    )
     engine.dispose()
 
 
@@ -25,6 +27,7 @@ def test_migration_can_upgrade_and_downgrade(tmp_path: Path) -> None:
     run_migrations(database_url)
     engine = create_database_engine(database_url)
 
-    assert "app_metadata" in inspect(engine).get_table_names()
+    assert {"app_metadata", "system_scans", "scan_step_events"}.issubset(
+        inspect(engine).get_table_names()
+    )
     engine.dispose()
-

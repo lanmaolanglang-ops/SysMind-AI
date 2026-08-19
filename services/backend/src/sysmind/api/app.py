@@ -8,8 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from sysmind.api.middleware import LocalApiSecurityMiddleware
 from sysmind.api.routes.health import router as health_router
+from sysmind.api.routes.scans import router as scans_router
+from sysmind.application.services import QuickScanCoordinator
 from sysmind.core.config import Settings, get_settings
 from sysmind.core.constants import API_VERSION, BACKEND_VERSION
+from sysmind.infrastructure.bootstrap import create_quick_scan_coordinator
 from sysmind.infrastructure.database import run_migrations
 from sysmind.observability.logging import configure_logging
 from sysmind.runtime.shutdown import ShutdownController
@@ -18,6 +21,7 @@ from sysmind.runtime.shutdown import ShutdownController
 def create_app(
     settings: Settings | None = None,
     shutdown_controller: ShutdownController | None = None,
+    quick_scan_coordinator: QuickScanCoordinator | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     controller = shutdown_controller or ShutdownController()
@@ -27,9 +31,15 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved_settings.data_dir.mkdir(parents=True, exist_ok=True)
         run_migrations(resolved_settings.database_url)
+        coordinator = quick_scan_coordinator or create_quick_scan_coordinator(
+            resolved_settings.database_url
+        )
+        app.state.quick_scan_coordinator = coordinator
+        coordinator.recover_interrupted()
         app.state.ready = True
         yield
         app.state.ready = False
+        await coordinator.shutdown()
 
     app = FastAPI(
         title="SysMind AI Local API",
@@ -50,5 +60,5 @@ def create_app(
         expose_headers=["X-Correlation-ID"],
     )
     app.include_router(health_router)
+    app.include_router(scans_router)
     return app
-

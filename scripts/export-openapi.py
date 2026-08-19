@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -18,7 +17,7 @@ def main() -> None:
     )
     document = create_app(settings).openapi()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(document, indent=2, ensure_ascii=False) + os.linesep, encoding="utf-8")
+    target.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(target)
 
 

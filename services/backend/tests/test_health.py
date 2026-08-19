@@ -39,6 +39,18 @@ def test_health_rejects_unknown_origin(client: TestClient) -> None:
     assert response.json()["error"]["code"] == "origin_not_allowed"
 
 
+def test_health_allows_vite_loopback_origin(client: TestClient) -> None:
+    response = client.get(
+        "/health",
+        headers={
+            "X-SysMind-Session": "test-session-token-that-is-long-enough",
+            "Origin": "http://127.0.0.1:1420",
+        },
+    )
+
+    assert response.status_code == 200
+
+
 def test_shutdown_requests_graceful_stop(
     client: TestClient,
     auth_headers: dict[str, str],
@@ -49,4 +61,3 @@ def test_shutdown_requests_graceful_stop(
     assert response.status_code == 200
     assert response.json() == {"status": "shutting_down"}
     assert shutdown_controller.requested is True
-

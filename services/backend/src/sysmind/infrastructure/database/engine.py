@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def create_database_engine(database_url: str) -> Engine:
@@ -17,3 +18,10 @@ def create_database_engine(database_url: str) -> Engine:
 
     return engine
 
+
+def create_session_factory(database_url: str) -> sessionmaker[Session]:
+    return sessionmaker(
+        bind=create_database_engine(database_url),
+        class_=Session,
+        expire_on_commit=False,
+    )

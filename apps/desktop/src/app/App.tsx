@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { QuickScanPanel } from "../features/scans/QuickScanPanel";
 import {
   BackendConnectionError,
   connectToBackend,
@@ -67,32 +68,48 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-lockup">
-          <span className="brand-symbol" aria-hidden="true">
-            S
-          </span>
-          <span>SysMind AI</span>
-        </div>
         <div className={`connection-chip connection-chip--${state.kind}`} role="status">
           <StatusMark state={state.kind} />
           {state.kind === "connected"
-            ? "Backend Connected"
+            ? "本地服务已连接"
             : state.kind === "starting"
-              ? "Backend Starting"
-              : "Backend Disconnected"}
+              ? "本地服务启动中"
+              : "本地服务未连接"}
         </div>
       </header>
 
-      <section className="workspace" aria-labelledby="workspace-title">
-        <div className="intro">
-          <p className="phase-label">Phase 0 · 工程初始化</p>
-          <h1 id="workspace-title">本地服务连接</h1>
-          <p>
-            SysMind AI 正在建立安全的本地运行环境。当前版本只验证桌面端与后端连接，尚未读取或诊断任何系统信息。
-          </p>
-        </div>
+      {state.kind === "connected" ? (
+        <section className="dashboard" aria-labelledby="workspace-title">
+          <div className="dashboard-intro">
+            <div>
+              <h1 id="workspace-title">设备概览</h1>
+              <p>用一次可审计的只读扫描，建立这台 Windows 电脑的当前状态快照。</p>
+            </div>
+            <dl className="connection-details">
+              <div>
+                <dt>本地后端</dt>
+                <dd>{state.connection.health.backend_version}</dd>
+              </div>
+              <div>
+                <dt>API</dt>
+                <dd>{state.connection.health.api_version}</dd>
+              </div>
+              <div>
+                <dt>网络边界</dt>
+                <dd>127.0.0.1</dd>
+              </div>
+            </dl>
+          </div>
+          <QuickScanPanel client={state.connection.client} />
+        </section>
+      ) : (
+        <section className="workspace" aria-labelledby="workspace-title">
+          <div className="intro">
+            <h1 id="workspace-title">正在准备</h1>
+            <p>安全启动本地服务后，即可进行只读系统扫描。所有结果默认保存在这台电脑上。</p>
+          </div>
 
-        <div className="runtime-panel">
+          <div className="runtime-panel">
           {state.kind === "starting" && (
             <div className="state-content" aria-live="polite">
               <div className="activity-line" aria-hidden="true">
@@ -100,32 +117,6 @@ export function App() {
               </div>
               <h2>正在启动本地后端</h2>
               <p>等待 FastAPI 完成数据库迁移和 readiness 检查。</p>
-            </div>
-          )}
-
-          {state.kind === "connected" && (
-            <div className="state-content" aria-live="polite">
-              <div className="state-heading">
-                <StatusMark state="connected" />
-                <h2>本地运行环境已就绪</h2>
-              </div>
-              <dl className="runtime-details">
-                <div>
-                  <dt>Backend</dt>
-                  <dd>{state.connection.health.backend_version}</dd>
-                </div>
-                <div>
-                  <dt>API protocol</dt>
-                  <dd>{state.connection.health.api_version}</dd>
-                </div>
-                <div>
-                  <dt>Network boundary</dt>
-                  <dd>127.0.0.1 only</dd>
-                </div>
-              </dl>
-              <p className="privacy-note">
-                会话令牌仅保存在当前进程内存中；本阶段没有模型调用和系统扫描。
-              </p>
             </div>
           )}
 
@@ -144,13 +135,10 @@ export function App() {
               </button>
             </div>
           )}
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
 
-      <footer>
-        <span>Local-first foundation</span>
-        <span>v0.1.0</span>
-      </footer>
     </main>
   );
 }

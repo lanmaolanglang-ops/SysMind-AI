@@ -28,12 +28,12 @@ The product runs as a single-user Windows desktop application. The Tauri shell o
 
 ## Capabilities and Constraints
 
-- Phase 0 establishes only the runnable engineering foundation and backend connection states.
+- Phase 1 provides a cancellable, auditable, read-only quick scan for OS, CPU, GPU, memory, disks, and current processes.
 - The application is read-only by default and runs without administrator privileges.
 - Models may never invoke Shell, PowerShell, or arbitrary commands.
 - Dangerous state changes require an application-authored confirmation flow and complete audit trail.
 - API keys must not be stored in plaintext in SQLite, logs, or Git.
-- Actual Windows diagnostics, AI providers, Agent behavior, and system repair are outside Phase 0.
+- AI providers, Agent behavior, process management, and system repair remain outside Phase 1.
 
 ## Brand Commitments
 
@@ -54,4 +54,3 @@ The product and architecture baseline is `docs/SysMind-AI-PRD-and-Architecture.m
 ## Accessibility & Inclusion
 
 The desktop interface must expose connection, loading, failure, and recovery states without relying on color alone, support keyboard focus, and use plain-language error recovery.
-
