@@ -53,6 +53,5 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.mypy]
 python_version = "3.11"
-platform = "win32"
 strict = true
 packages = ["sysmind"]
