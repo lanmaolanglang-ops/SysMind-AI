@@ -96,4 +96,3 @@ def log_event(
             **_sanitize(context),
         },
     )
-

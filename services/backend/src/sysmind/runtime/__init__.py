@@ -1,2 +1,1 @@
 """Sidecar process lifecycle."""
-

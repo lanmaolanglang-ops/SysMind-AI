@@ -179,10 +179,1628 @@
           }
         }
       }
+    },
+    "/api/v1/log-analyses": {
+      "post": {
+        "tags": [
+          "log analyses"
+        ],
+        "summary": "Start Log Analysis",
+        "operationId": "start_log_analysis_api_v1_log_analyses_post",
+        "parameters": [
+          {
+            "name": "X-Correlation-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Correlation-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLogAnalysisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogAnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "log analyses"
+        ],
+        "summary": "Recent Log Analyses",
+        "operationId": "recent_log_analyses_api_v1_log_analyses_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogAnalysisListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/log-analyses/{analysis_id}": {
+      "get": {
+        "tags": [
+          "log analyses"
+        ],
+        "summary": "Get Log Analysis",
+        "operationId": "get_log_analysis_api_v1_log_analyses__analysis_id__get",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogAnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/log-analyses/{analysis_id}/cancel": {
+      "post": {
+        "tags": [
+          "log analyses"
+        ],
+        "summary": "Cancel Log Analysis",
+        "operationId": "cancel_log_analysis_api_v1_log_analyses__analysis_id__cancel_post",
+        "parameters": [
+          {
+            "name": "analysis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Analysis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogAnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/tools": {
+      "get": {
+        "tags": [
+          "agent tasks"
+        ],
+        "summary": "Available Tools",
+        "operationId": "available_tools_api_v1_tasks_tools_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolCatalogResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks": {
+      "post": {
+        "tags": [
+          "agent tasks"
+        ],
+        "summary": "Start Agent Task",
+        "operationId": "start_agent_task_api_v1_tasks_post",
+        "parameters": [
+          {
+            "name": "X-Correlation-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Correlation-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAgentTaskRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "agent tasks"
+        ],
+        "summary": "Recent Agent Tasks",
+        "operationId": "recent_agent_tasks_api_v1_tasks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "agent tasks"
+        ],
+        "summary": "Get Agent Task",
+        "operationId": "get_agent_task_api_v1_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "agent tasks"
+        ],
+        "summary": "Cancel Agent Task",
+        "operationId": "cancel_agent_task_api_v1_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/events": {
+      "get": {
+        "tags": [
+          "agent tasks"
+        ],
+        "summary": "Stream Agent Task Events",
+        "operationId": "stream_agent_task_events_api_v1_tasks__task_id__events_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnoses": {
+      "get": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Recent Diagnoses",
+        "operationId": "recent_diagnoses_api_v1_diagnoses_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Start Diagnosis",
+        "operationId": "start_diagnosis_api_v1_diagnoses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartDiagnosisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnoses/{diagnosis_id}": {
+      "get": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Get Diagnosis",
+        "operationId": "get_diagnosis_api_v1_diagnoses__diagnosis_id__get",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Diagnosis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnoses/{diagnosis_id}/cancel": {
+      "post": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Cancel Diagnosis",
+        "operationId": "cancel_diagnosis_api_v1_diagnoses__diagnosis_id__cancel_post",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Diagnosis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnoses/{diagnosis_id}/feedback": {
+      "post": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Submit Feedback",
+        "operationId": "submit_feedback_api_v1_diagnoses__diagnosis_id__feedback_post",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Diagnosis Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiagnosisFeedbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnoses/{diagnosis_id}/export": {
+      "get": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Export Diagnosis",
+        "operationId": "export_diagnosis_api_v1_diagnoses__diagnosis_id__export_get",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Diagnosis Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(json|markdown)$",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/candidates": {
+      "get": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Candidates",
+        "operationId": "candidates_api_v1_actions_candidates_get",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "title": "Diagnosis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/process-candidates": {
+      "get": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Process Candidates",
+        "operationId": "process_candidates_api_v1_actions_process_candidates_get",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "title": "Diagnosis Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessCandidateListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions": {
+      "get": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Recent Actions",
+        "operationId": "recent_actions_api_v1_actions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Create Action",
+        "operationId": "create_action_api_v1_actions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/process-close": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Create Process Close",
+        "operationId": "create_process_close_api_v1_actions_process_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProcessActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{close_action_id}/termination": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Create Process Termination",
+        "operationId": "create_process_termination_api_v1_actions__close_action_id__termination_post",
+        "parameters": [
+          {
+            "name": "close_action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Close Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}": {
+      "get": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Get Action",
+        "operationId": "get_action_api_v1_actions__action_id__get",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}/confirm": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Confirm Action",
+        "operationId": "confirm_action_api_v1_actions__action_id__confirm_post",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}/reject": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Reject Action",
+        "operationId": "reject_action_api_v1_actions__action_id__reject_post",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}/execute": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Execute Action",
+        "operationId": "execute_action_api_v1_actions__action_id__execute_post",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/actions/{action_id}/recovery": {
+      "post": {
+        "tags": [
+          "actions"
+        ],
+        "summary": "Create Recovery",
+        "operationId": "create_recovery_api_v1_actions__action_id__recovery_post",
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ActionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ActionResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ActionListResponse"
+      },
+      "ActionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "diagnosis_id": {
+            "type": "string",
+            "title": "Diagnosis Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "tool_version": {
+            "type": "string",
+            "title": "Tool Version"
+          },
+          "target_name": {
+            "type": "string",
+            "title": "Target Name"
+          },
+          "source_kind": {
+            "type": "string",
+            "title": "Source Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "recovery_available": {
+            "type": "boolean",
+            "title": "Recovery Available"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "plan_id",
+          "diagnosis_id",
+          "tool_name",
+          "tool_version",
+          "target_name",
+          "source_kind",
+          "status",
+          "recovery_available",
+          "error_code",
+          "error_message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ActionResponse"
+      },
+      "AgentBudgetDto": {
+        "properties": {
+          "max_rounds": {
+            "type": "integer",
+            "title": "Max Rounds"
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "title": "Max Tool Calls"
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "title": "Timeout Seconds"
+          },
+          "max_parallel_tools": {
+            "type": "integer",
+            "title": "Max Parallel Tools"
+          }
+        },
+        "type": "object",
+        "required": [
+          "max_rounds",
+          "max_tool_calls",
+          "timeout_seconds",
+          "max_parallel_tools"
+        ],
+        "title": "AgentBudgetDto"
+      },
+      "AgentBudgetRequest": {
+        "properties": {
+          "max_rounds": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 1.0,
+            "title": "Max Rounds",
+            "default": 4
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "maximum": 16.0,
+            "minimum": 0.0,
+            "title": "Max Tool Calls",
+            "default": 8
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "maximum": 120.0,
+            "minimum": 2.0,
+            "title": "Timeout Seconds",
+            "default": 30
+          },
+          "max_parallel_tools": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Max Parallel Tools",
+            "default": 2
+          }
+        },
+        "type": "object",
+        "title": "AgentBudgetRequest"
+      },
+      "AgentTaskListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentTaskResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AgentTaskListResponse"
+      },
+      "AgentTaskResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "planning",
+              "running_tools",
+              "analyzing",
+              "waiting_user_input",
+              "completed",
+              "cancelling",
+              "cancelled",
+              "failed",
+              "timed_out",
+              "interrupted"
+            ],
+            "title": "Status"
+          },
+          "user_goal": {
+            "type": "string",
+            "title": "User Goal"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Tools"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/AgentBudgetDto"
+          },
+          "current_round": {
+            "type": "integer",
+            "title": "Current Round"
+          },
+          "tool_call_count": {
+            "type": "integer",
+            "title": "Tool Call Count"
+          },
+          "progress": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress"
+          },
+          "working_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Working Summary"
+          },
+          "final_output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Output"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "cancel_requested": {
+            "type": "boolean",
+            "title": "Cancel Requested"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "tool_calls": {
+            "items": {
+              "$ref": "#/components/schemas/AgentToolCallDto"
+            },
+            "type": "array",
+            "title": "Tool Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "user_goal",
+          "provider",
+          "allowed_tools",
+          "budget",
+          "current_round",
+          "tool_call_count",
+          "progress",
+          "working_summary",
+          "final_output",
+          "failure_code",
+          "failure_message",
+          "cancel_requested",
+          "created_at",
+          "started_at",
+          "finished_at",
+          "schema_version"
+        ],
+        "title": "AgentTaskResponse"
+      },
+      "AgentToolCallDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_call_id": {
+            "type": "string",
+            "title": "Provider Call Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "tool_version": {
+            "type": "string",
+            "title": "Tool Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "arguments_hash": {
+            "type": "string",
+            "title": "Arguments Hash"
+          },
+          "risk_level": {
+            "type": "string",
+            "title": "Risk Level"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Summary"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_call_id",
+          "tool_name",
+          "tool_version",
+          "status",
+          "arguments_hash",
+          "risk_level",
+          "started_at",
+          "finished_at",
+          "duration_ms",
+          "result_summary",
+          "error_code",
+          "error_message"
+        ],
+        "title": "AgentToolCallDto"
+      },
+      "CandidateListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CandidateListResponse"
+      },
+      "CandidateResponse": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source_kind": {
+            "type": "string",
+            "title": "Source Kind"
+          },
+          "command_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Name"
+          },
+          "observed_revision": {
+            "type": "string",
+            "title": "Observed Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "name",
+          "source_kind",
+          "command_name",
+          "observed_revision"
+        ],
+        "title": "CandidateResponse"
+      },
       "CapabilityDto": {
         "properties": {
           "name": {
@@ -211,6 +1829,42 @@
           "available"
         ],
         "title": "CapabilityDto"
+      },
+      "ConsentResponse": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ActionResponse"
+          },
+          "ticket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "ticket",
+          "expires_at"
+        ],
+        "title": "ConsentResponse"
       },
       "CpuDto": {
         "properties": {
@@ -251,6 +1905,294 @@
           "frequency_mhz"
         ],
         "title": "CpuDto"
+      },
+      "CrashGroupDto": {
+        "properties": {
+          "application": {
+            "type": "string",
+            "title": "Application"
+          },
+          "faulting_module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Faulting Module"
+          },
+          "exception_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exception Code"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "latest_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Latest At"
+          },
+          "evidence_event_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Evidence Event Ids"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Providers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "application",
+          "faulting_module",
+          "exception_code",
+          "count",
+          "latest_at",
+          "evidence_event_ids",
+          "providers"
+        ],
+        "title": "CrashGroupDto"
+      },
+      "CreateActionRequest": {
+        "properties": {
+          "diagnosis_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Diagnosis Id"
+          },
+          "item_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Item Id"
+          },
+          "observed_revision": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Observed Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "diagnosis_id",
+          "item_id",
+          "observed_revision"
+        ],
+        "title": "CreateActionRequest"
+      },
+      "CreateProcessActionRequest": {
+        "properties": {
+          "diagnosis_id": {
+            "type": "string",
+            "maxLength": 36,
+            "minLength": 36,
+            "title": "Diagnosis Id"
+          },
+          "item_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Item Id"
+          },
+          "observed_revision": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Observed Revision"
+          }
+        },
+        "type": "object",
+        "required": [
+          "diagnosis_id",
+          "item_id",
+          "observed_revision"
+        ],
+        "title": "CreateProcessActionRequest"
+      },
+      "DiagnosisFeedbackRequest": {
+        "properties": {
+          "helpful": {
+            "type": "boolean",
+            "title": "Helpful"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "type": "object",
+        "required": [
+          "helpful"
+        ],
+        "title": "DiagnosisFeedbackRequest"
+      },
+      "DiagnosisListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DiagnosisResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "DiagnosisListResponse"
+      },
+      "DiagnosisResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "user_question": {
+            "type": "string",
+            "title": "User Question"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "plan": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Plan"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "tool_calls": {
+            "items": {
+              "$ref": "#/components/schemas/ToolCallDto"
+            },
+            "type": "array",
+            "title": "Tool Calls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "user_question",
+          "category",
+          "provider",
+          "plan",
+          "progress",
+          "current_step",
+          "report",
+          "failure_code",
+          "failure_message",
+          "created_at",
+          "completed_at",
+          "schema_version"
+        ],
+        "title": "DiagnosisResponse"
       },
       "DiskDto": {
         "properties": {
@@ -294,6 +2236,237 @@
           "utilization_percent"
         ],
         "title": "DiskDto"
+      },
+      "EventEvidenceDto": {
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "Application",
+              "System"
+            ],
+            "title": "Channel"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "error",
+              "warning",
+              "information"
+            ],
+            "title": "Level"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "application": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application"
+          },
+          "faulting_module": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Faulting Module"
+          },
+          "exception_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exception Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "provider",
+          "event_id",
+          "level",
+          "timestamp",
+          "summary"
+        ],
+        "title": "EventEvidenceDto"
+      },
+      "EventGroupDto": {
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "Application",
+              "System"
+            ],
+            "title": "Channel"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "event_id": {
+            "type": "integer",
+            "title": "Event Id"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "error",
+              "warning",
+              "information"
+            ],
+            "title": "Level"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "latest_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Latest At"
+          },
+          "sample_summary": {
+            "type": "string",
+            "title": "Sample Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "provider",
+          "event_id",
+          "level",
+          "count",
+          "latest_at",
+          "sample_summary"
+        ],
+        "title": "EventGroupDto"
+      },
+      "EvidenceDto": {
+        "properties": {
+          "tool_call_id": {
+            "type": "string",
+            "title": "Tool Call Id"
+          },
+          "field_path": {
+            "type": "string",
+            "title": "Field Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_call_id",
+          "field_path"
+        ],
+        "title": "EvidenceDto"
+      },
+      "ExecuteActionRequest": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 20,
+            "title": "Ticket"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket"
+        ],
+        "title": "ExecuteActionRequest"
+      },
+      "FeedbackAccepted": {
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "FeedbackAccepted"
+      },
+      "FindingDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "recommendation": {
+            "type": "string",
+            "title": "Recommendation"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDto"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "severity",
+          "title",
+          "explanation",
+          "recommendation",
+          "confidence",
+          "evidence"
+        ],
+        "title": "FindingDto"
       },
       "GpuDto": {
         "properties": {
@@ -375,6 +2548,237 @@
         ],
         "title": "HealthResponse"
       },
+      "LogAnalysisFailureDto": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "title": "Tool"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool",
+          "code",
+          "message"
+        ],
+        "title": "LogAnalysisFailureDto"
+      },
+      "LogAnalysisListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LogAnalysisResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "LogAnalysisListResponse"
+      },
+      "LogAnalysisQueryDto": {
+        "properties": {
+          "channels": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "Application",
+                "System"
+              ]
+            },
+            "type": "array",
+            "title": "Channels"
+          },
+          "lookback_hours": {
+            "type": "integer",
+            "title": "Lookback Hours"
+          },
+          "levels": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "error",
+                "warning",
+                "information"
+              ]
+            },
+            "type": "array",
+            "title": "Levels"
+          },
+          "event_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Event Ids"
+          },
+          "max_events": {
+            "type": "integer",
+            "title": "Max Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channels",
+          "lookback_hours",
+          "levels",
+          "event_ids",
+          "max_events"
+        ],
+        "title": "LogAnalysisQueryDto"
+      },
+      "LogAnalysisResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "partial",
+              "cancelled",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "progress": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "query": {
+            "$ref": "#/components/schemas/LogAnalysisQueryDto"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LogAnalysisSummaryDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/LogAnalysisFailureDto"
+            },
+            "type": "array",
+            "title": "Failures"
+          },
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "progress",
+          "current_step",
+          "started_at",
+          "finished_at",
+          "query",
+          "summary",
+          "failures",
+          "schema_version"
+        ],
+        "title": "LogAnalysisResponse"
+      },
+      "LogAnalysisSummaryDto": {
+        "properties": {
+          "event_count": {
+            "type": "integer",
+            "title": "Event Count"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventEvidenceDto"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "event_groups": {
+            "items": {
+              "$ref": "#/components/schemas/EventGroupDto"
+            },
+            "type": "array",
+            "title": "Event Groups"
+          },
+          "crash_groups": {
+            "items": {
+              "$ref": "#/components/schemas/CrashGroupDto"
+            },
+            "type": "array",
+            "title": "Crash Groups"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_count",
+          "events",
+          "event_groups",
+          "crash_groups"
+        ],
+        "title": "LogAnalysisSummaryDto"
+      },
       "MemoryDto": {
         "properties": {
           "total_bytes": {
@@ -431,6 +2835,72 @@
         ],
         "title": "OperatingSystemDto"
       },
+      "ProcessCandidateListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessCandidateResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ProcessCandidateListResponse"
+      },
+      "ProcessCandidateResponse": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source_kind": {
+            "type": "string",
+            "title": "Source Kind"
+          },
+          "command_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Name"
+          },
+          "observed_revision": {
+            "type": "string",
+            "title": "Observed Revision"
+          },
+          "cpu_percent": {
+            "type": "number",
+            "title": "Cpu Percent"
+          },
+          "memory_percent": {
+            "type": "number",
+            "title": "Memory Percent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "name",
+          "source_kind",
+          "command_name",
+          "observed_revision",
+          "cpu_percent",
+          "memory_percent"
+        ],
+        "title": "ProcessCandidateResponse"
+      },
       "ProcessDto": {
         "properties": {
           "pid": {
@@ -463,6 +2933,55 @@
           "memory_percent"
         ],
         "title": "ProcessDto"
+      },
+      "ReportDto": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingDto"
+            },
+            "type": "array",
+            "title": "Findings"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          },
+          "model_explanation": {
+            "type": "string",
+            "title": "Model Explanation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema_version",
+          "summary",
+          "category",
+          "findings",
+          "confidence",
+          "limitations",
+          "model_explanation"
+        ],
+        "title": "ReportDto"
       },
       "ScanFailureDto": {
         "properties": {
@@ -661,6 +3180,228 @@
         },
         "type": "object",
         "title": "ScanSummaryDto"
+      },
+      "StartAgentTaskRequest": {
+        "properties": {
+          "user_goal": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "User Goal"
+          },
+          "allowed_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Allowed Tools"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/AgentBudgetRequest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_goal"
+        ],
+        "title": "StartAgentTaskRequest"
+      },
+      "StartDiagnosisRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Question"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "StartDiagnosisRequest"
+      },
+      "StartLogAnalysisRequest": {
+        "properties": {
+          "channels": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "Application",
+                "System"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Channels",
+            "default": [
+              "Application",
+              "System"
+            ]
+          },
+          "lookback_hours": {
+            "type": "integer",
+            "maximum": 168.0,
+            "minimum": 1.0,
+            "title": "Lookback Hours",
+            "default": 24
+          },
+          "levels": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "error",
+                "warning",
+                "information"
+              ]
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Levels",
+            "default": [
+              "critical",
+              "error",
+              "warning"
+            ]
+          },
+          "event_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Event Ids"
+          },
+          "max_events": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Max Events",
+            "default": 100
+          }
+        },
+        "type": "object",
+        "title": "StartLogAnalysisRequest"
+      },
+      "ToolCallDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "tool_version": {
+            "type": "string",
+            "title": "Tool Version"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tool_name",
+          "tool_version",
+          "status",
+          "summary",
+          "error_code"
+        ],
+        "title": "ToolCallDto"
+      },
+      "ToolCatalogResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ToolDescriptorDto"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ToolCatalogResponse"
+      },
+      "ToolDescriptorDto": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "qualified_name": {
+            "type": "string",
+            "title": "Qualified Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "input_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Input Schema"
+          },
+          "risk_level": {
+            "type": "string",
+            "title": "Risk Level"
+          },
+          "sensitivity": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sensitivity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "qualified_name",
+          "description",
+          "input_schema",
+          "risk_level",
+          "sensitivity"
+        ],
+        "title": "ToolDescriptorDto"
       },
       "ValidationError": {
         "properties": {

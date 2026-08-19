@@ -13,6 +13,11 @@ TEST_TOKEN = "test-session-token-that-is-long-enough"
 
 
 @pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(data_dir=tmp_path, session_token=SecretStr(TEST_TOKEN))
 
@@ -23,9 +28,7 @@ def shutdown_controller() -> ShutdownController:
 
 
 @pytest.fixture
-def client(
-    settings: Settings, shutdown_controller: ShutdownController
-) -> Iterator[TestClient]:
+def client(settings: Settings, shutdown_controller: ShutdownController) -> Iterator[TestClient]:
     with TestClient(create_app(settings, shutdown_controller)) as test_client:
         yield test_client
 
@@ -33,4 +36,3 @@ def client(
 @pytest.fixture
 def auth_headers() -> dict[str, str]:
     return {"X-SysMind-Session": TEST_TOKEN, "Origin": "tauri://localhost"}
-

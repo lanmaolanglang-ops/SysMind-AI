@@ -78,4 +78,3 @@ class ScanRecord:
     summary: dict[str, object] | None
     failures: list[dict[str, str]]
     schema_version: str
-

@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
   "pydantic-settings>=2.7,<3",
   "psutil>=6.1,<8",
   "sqlalchemy>=2.0,<3",
@@ -19,12 +20,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "httpx>=0.28,<1",
   "mypy>=1.14,<2",
   "pytest>=8.3,<9",
   "pytest-cov>=6,<8",
   "ruff>=0.9,<1",
   "types-psutil>=7.0,<8",
+]
+packaging = [
+  "pyinstaller>=6.16,<7",
 ]
 
 [project.scripts]
@@ -36,7 +39,10 @@ packages = ["src/sysmind"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --basetemp=.pytest-tmp"
 testpaths = ["tests"]
-markers = ["windows_smoke: read-only integration checks against the current Windows host"]
+markers = [
+    "windows_smoke: read-only integration checks against the current Windows host",
+    "destructive_sandbox: state-changing checks allowed only in an explicitly acknowledged Windows Sandbox/VM",
+]
 
 [tool.ruff]
 line-length = 100

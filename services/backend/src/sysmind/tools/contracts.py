@@ -18,3 +18,6 @@ class ToolUnavailableError(RuntimeError):
 class ToolCancelledError(RuntimeError):
     pass
 
+
+class ToolPermissionError(RuntimeError):
+    pass

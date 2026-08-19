@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { QuickScanPanel } from "../features/scans/QuickScanPanel";
+import { LogAnalysisPanel } from "../features/logs/LogAnalysisPanel";
+import { AgentTaskPanel } from "../features/tasks/AgentTaskPanel";
+import { DiagnosisPanel } from "../features/diagnose/DiagnosisPanel";
+import { UpdatePanel } from "../features/updates/UpdatePanel";
 import {
   BackendConnectionError,
   connectToBackend,
@@ -100,7 +104,11 @@ export function App() {
               </div>
             </dl>
           </div>
+          <UpdatePanel />
+          <DiagnosisPanel client={state.connection.client} />
           <QuickScanPanel client={state.connection.client} />
+          <LogAnalysisPanel client={state.connection.client} />
+          <AgentTaskPanel client={state.connection.client} />
         </section>
       ) : (
         <section className="workspace" aria-labelledby="workspace-title">

@@ -25,4 +25,3 @@ def shutdown(request: Request) -> ShutdownResponse:
     controller: ShutdownController = request.app.state.shutdown_controller
     controller.request_shutdown()
     return ShutdownResponse()
-

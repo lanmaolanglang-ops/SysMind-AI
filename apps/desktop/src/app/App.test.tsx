@@ -13,6 +13,22 @@ vi.mock("../features/scans/QuickScanPanel", () => ({
   QuickScanPanel: () => <div>快速扫描面板</div>,
 }));
 
+vi.mock("../features/logs/LogAnalysisPanel", () => ({
+  LogAnalysisPanel: () => <div>日志分析面板</div>,
+}));
+
+vi.mock("../features/tasks/AgentTaskPanel", () => ({
+  AgentTaskPanel: () => <div>Agent 任务面板</div>,
+}));
+
+vi.mock("../features/diagnose/DiagnosisPanel", () => ({
+  DiagnosisPanel: () => <div>自然语言诊断面板</div>,
+}));
+
+vi.mock("../features/updates/UpdatePanel", () => ({
+  UpdatePanel: () => <div>安全更新面板</div>,
+}));
+
 vi.mock("../services/backend", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../services/backend")>();
   return {
@@ -54,6 +70,10 @@ describe("App", () => {
     expect(screen.getByText("127.0.0.1")).toBeInTheDocument();
     expect(screen.getByText("设备概览")).toBeInTheDocument();
     expect(screen.getByText("快速扫描面板")).toBeInTheDocument();
+    expect(screen.getByText("日志分析面板")).toBeInTheDocument();
+    expect(screen.getByText("Agent 任务面板")).toBeInTheDocument();
+    expect(screen.getByText("自然语言诊断面板")).toBeInTheDocument();
+    expect(screen.getByText("安全更新面板")).toBeInTheDocument();
   });
 
   it("shows a recoverable startup failure", async () => {

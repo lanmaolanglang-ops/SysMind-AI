@@ -3,4 +3,3 @@ API_VERSION = "1.0"
 LOOPBACK_HOST = "127.0.0.1"
 SESSION_HEADER = "X-SysMind-Session"
 CORRELATION_HEADER = "X-Correlation-ID"
-

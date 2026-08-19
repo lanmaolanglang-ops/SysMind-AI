@@ -21,4 +21,3 @@ class FakeSecretService:
     def delete(self, key: str) -> None:
         with self._lock:
             self._values.pop(key, None)
-

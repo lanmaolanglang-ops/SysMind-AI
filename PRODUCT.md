@@ -24,16 +24,18 @@ It is a local-first diagnostic agent rather than a generic chatbot: system acces
 
 ## Operating Context
 
-The product runs as a single-user Windows desktop application. The Tauri shell owns a loopback-only FastAPI sidecar. Cloud model use is optional and later phases must minimize and redact any data sent remotely.
+The product runs as a single-user Windows desktop application. The Tauri shell owns a loopback-only frozen FastAPI sidecar. Phase 6 distributes a per-user signed NSIS installer and signature-verified updates while preserving local diagnostic data; Phase 5 actions remain evidence-bound and the optional model remains outside the action path.
 
 ## Capabilities and Constraints
 
-- Phase 1 provides a cancellable, auditable, read-only quick scan for OS, CPU, GPU, memory, disks, and current processes.
+- Phase 4 maps performance, network, and application-crash questions to bounded plans and produces reports whose conclusions reference real tool calls and field paths.
 - The application is read-only by default and runs without administrator privileges.
 - Models may never invoke Shell, PowerShell, or arbitrary commands.
 - Dangerous state changes require an application-authored confirmation flow and complete audit trail.
 - API keys must not be stored in plaintext in SQLite, logs, or Git.
-- AI providers, Agent behavior, process management, and system repair remain outside Phase 1.
+- Full tool results stay local while only bounded summaries may enter model context. Unknown tools, invalid arguments, repeated calls, and exceeded budgets fail closed.
+- Network checks generate limited outbound traffic only to fixed application-owned test targets after the user starts a network diagnosis.
+- Phase 5 supports current-user startup disable/restore, bounded GUI close, and double-confirmed forced termination only after a close remains pending. Service, network, privileged, bulk, and generic repair actions remain unavailable.
 
 ## Brand Commitments
 

@@ -1,6 +1,6 @@
 ---
 name: "SysMind AI"
-description: "Calm local Windows diagnostics with readable, auditable evidence."
+description: "Calm local Windows diagnostics with bounded, readable, auditable evidence."
 colors:
   local-green: "#246340"
   local-green-deep: "#194e31"
@@ -72,7 +72,7 @@ components:
 
 SysMind AI uses familiar Windows typography, quiet green-gray surfaces, and one dominant evidence panel to make local diagnostics feel controlled rather than alarming. Phase 1 extends the original connection shell into an operational scan surface without becoming a dense monitoring dashboard.
 
-The interface privileges truthful state: local-service readiness, current collector, terminal result, partial failure, and cancellation are always written in plain Chinese. Hardware evidence is allowed to wrap and data stays readable instead of being shortened for symmetry.
+The interface privileges truthful state: local-service readiness, current collector, terminal result, partial failure, and cancellation are always written in plain Chinese. Hardware and redacted event evidence are allowed to wrap and data stays readable instead of being shortened for symmetry.
 
 **Key Characteristics:**
 
@@ -81,6 +81,7 @@ The interface privileges truthful state: local-service readiness, current collec
 - Large direct headings, compact metadata, and tabular numeric details.
 - Text accompanies every semantic color and progress state.
 - Narrow windows preserve the primary scan action and all evidence fields.
+- Event-log filters expose channel, level, bounded time window, and optional event IDs before collection starts.
 
 ## Colors
 
@@ -148,6 +149,46 @@ The system uses gently rounded utility geometry: a 16px scan panel, 10px control
 - Disk usage includes visible available/used text plus a semantic meter.
 - Process rows preserve name, normalized whole-machine CPU, and memory at every supported width.
 
+### Event Log Analysis
+
+- A quieter bordered surface follows the primary quick-scan panel and does not compete with its elevation.
+- The sensitivity label states that event logs are read-only but may contain sensitive data.
+- Common event groups, application crash groups, partial channel failures, and redacted evidence remain distinct.
+- Filter controls never permit an empty channel or level selection, and the UI does not expose raw XPath or arbitrary channel input.
+
+### Bounded Agent Runtime
+
+- A bordered operational surface follows collected evidence and is explicitly labeled as the Phase 3 restricted runtime, not as a diagnosis report.
+- The default Fake Provider is visibly identified as offline; the interface never implies that data was sent to a cloud model.
+- Users choose from the registered read-only tool catalog. There is no free-form tool name, command, privilege, confirmation, or provider-secret input.
+- Ordered planning, tool, completion, failure, and cancellation events remain readable after an SSE reconnect, with the last event cursor preserved.
+- Cancellation stays available while work is active; terminal output distinguishes a result from the local audit timeline.
+
+### Natural-language Diagnosis and Reports
+
+- The diagnosis surface appears before specialist scan panels and asks for the symptom in ordinary language.
+- A visible read-only label and nearby network disclosure establish scope before the primary action; network text names fixed targets and bounded traffic without implying a generic connectivity probe.
+- The application-authored plan is shown as a compact ordered ledger with purpose and exact versioned tool, so progress remains understandable without exposing raw arguments.
+- Reports use one flat evidence document: ranked findings, explanation, recommendation, confidence, and readable tool-call/field-path references separated by rules rather than nested cards.
+- Limitations are first-class report content. Partial evidence, ambiguous classification, and model fallback remain visible beside otherwise successful conclusions.
+- Export and feedback are secondary actions after the evidence, while recent reports remain selectable without browser persistence.
+
+### Controlled Repair Actions
+
+- Controlled repair appears inside a completed evidence report and is visually separate from diagnosis.
+- The user first selects an enumerated current-user startup item, then reviews a confirmation card naming the exact target, effect, two-minute scope, and verification behavior.
+- Reject and confirm are explicit per-item decisions; there is no batch approval, persistent authorization, arbitrary path field, or model-authored action.
+- Success is shown only after verification. Recovery creates another confirmation card and never overwrites a target slot changed by another program.
+- Process candidates appear only when directly supported by high-usage evidence. Graceful close explains the save prompt and bounded wait; it never auto-escalates.
+- Forced termination is available only after a pending close and uses two visibly distinct confirmations that state unsaved data may be lost and recovery is unavailable.
+
+### Application Updates
+
+- Update status is a flat utility strip between device identity and diagnosis, not another elevated panel.
+- Checking is explicit because it creates outbound traffic; failure states confirm that local diagnosis remains usable.
+- A discovered version requires a separate install-and-restart action. Copy states that signatures are verified and local diagnostic data is preserved.
+- Long versions and errors wrap; loading, current, available, installing, and retry states remain keyboard accessible and never rely on color alone.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -162,4 +203,4 @@ The system uses gently rounded utility geometry: a 16px scan panel, 10px control
 - **Don't** turn system evidence into a grid of floating statistic cards.
 - **Don't** truncate hardware truth or hide metrics merely to simplify narrow layouts.
 - **Don't** add phase kickers, decorative sequence numbers, gradients, glass effects, or duplicate in-app branding.
-- **Don't** imply Agent, repair, process termination, or other capabilities that Phase 1 does not provide.
+- **Don't** present the bounded Agent runtime as autonomous repair, process termination, or a Phase 4 diagnosis report.

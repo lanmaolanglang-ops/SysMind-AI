@@ -21,4 +21,3 @@ class ProcessTools:
             "process.snapshot": self._probe.snapshot,
             "process.high_usage": lambda: self._probe.high_usage(cancel_event),
         }
-

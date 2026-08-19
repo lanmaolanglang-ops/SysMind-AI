@@ -1,0 +1,14 @@
+<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+  <System>
+    <Provider Name="Windows Error Reporting" />
+    <EventID>1001</EventID>
+    <Level>4</Level>
+    <TimeCreated SystemTime="2026-08-19T10:05:00.000Z" />
+  </System>
+  <EventData>
+    <Data Name="AppName">demo.exe</Data>
+    <Data Name="ModuleName">KERNELBASE.dll</Data>
+    <Data Name="ExceptionCode">0xc0000005</Data>
+    <Data Name="描述">应用程序已停止工作</Data>
+  </EventData>
+</Event>

@@ -41,9 +41,7 @@ class Settings(BaseSettings):
 
     @field_validator("host")
     @classmethod
-    def reject_non_loopback(
-        cls, value: Literal["127.0.0.1"]
-    ) -> Literal["127.0.0.1"]:
+    def reject_non_loopback(cls, value: Literal["127.0.0.1"]) -> Literal["127.0.0.1"]:
         if value != LOOPBACK_HOST:
             raise ValueError("SysMind backend must listen on 127.0.0.1")
         return value

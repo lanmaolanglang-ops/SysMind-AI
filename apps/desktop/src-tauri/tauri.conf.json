@@ -26,8 +26,27 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "nsis"
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "SysMind AI contributors",
+    "shortDescription": "Local-first Windows diagnostics",
+    "longDescription": "A local-first Windows diagnostic assistant with evidence-bound reports and controlled actions.",
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": true,
+        "languages": ["English", "SimpChinese"]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
+    }
   }
 }
-

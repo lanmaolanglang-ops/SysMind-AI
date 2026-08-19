@@ -1,2 +1,1 @@
 """FastAPI presentation layer."""
-
