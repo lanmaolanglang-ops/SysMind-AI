@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/v1/scans", tags=["scans"])
 
 
 def _coordinator(request: Request) -> QuickScanCoordinator:
-    return request.app.state.quick_scan_coordinator
+    return cast(QuickScanCoordinator, request.app.state.quick_scan_coordinator)
 
 
 @router.post("/quick", response_model=ScanResponse, status_code=status.HTTP_202_ACCEPTED)

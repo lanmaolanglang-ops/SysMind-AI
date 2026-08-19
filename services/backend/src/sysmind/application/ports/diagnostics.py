@@ -41,4 +41,3 @@ class ProcessProbe(Protocol):
         memory_threshold: float = 10.0,
         limit: int = 20,
     ) -> Sequence[ProcessInfo]: ...
-

@@ -32,4 +32,3 @@ class SystemTools:
             "system.memory": self._probe.memory,
             "system.disks": self._probe.disks,
         }
-

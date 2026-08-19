@@ -33,4 +33,3 @@ def test_structured_log_has_required_fields_and_redacts_secrets() -> None:
     assert payload["correlation_id"] == "correlation-1"
     assert payload["context"]["api_key"] == "[REDACTED]"
     assert "must-not-appear" not in stream.getvalue()
-

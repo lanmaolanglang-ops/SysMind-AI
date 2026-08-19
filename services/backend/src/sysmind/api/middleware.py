@@ -62,4 +62,3 @@ class LocalApiSecurityMiddleware(BaseHTTPMiddleware):
         )
         response.headers[CORRELATION_HEADER] = correlation_id
         return response
-

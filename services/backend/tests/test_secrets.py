@@ -10,4 +10,3 @@ def test_fake_secret_service_is_an_in_memory_port_implementation() -> None:
 
     service.delete("provider")
     assert service.get("provider") is None
-

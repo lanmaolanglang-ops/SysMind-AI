@@ -13,4 +13,3 @@ class ShutdownController:
         self.requested = True
         if self._callback is not None:
             self._callback()
-

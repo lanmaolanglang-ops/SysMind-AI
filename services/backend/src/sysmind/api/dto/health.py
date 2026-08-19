@@ -16,4 +16,3 @@ class ShutdownResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["shutting_down"] = "shutting_down"
-

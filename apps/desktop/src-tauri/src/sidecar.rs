@@ -92,7 +92,13 @@ impl BackendManager {
                     .app_local_data_dir()
                     .unwrap_or_else(|_| PathBuf::from(".sysmind-data"))
             });
-        let launcher = LauncherCommand::resolve();
+        let launcher = match LauncherCommand::resolve(app) {
+            Ok(launcher) => launcher,
+            Err(error) => {
+                self.fail(error);
+                return;
+            }
+        };
         let mut command = Command::new(&launcher.program);
         command
             .args(&launcher.prefix_args)
@@ -390,20 +396,49 @@ struct LauncherCommand {
 }
 
 impl LauncherCommand {
-    fn resolve() -> Self {
+    fn resolve(app: &AppHandle) -> Result<Self, String> {
         if let Some(program) = std::env::var_os("SYSMIND_BACKEND_EXECUTABLE") {
-            return Self {
+            return Ok(Self {
                 program: PathBuf::from(program),
                 prefix_args: Vec::new(),
-            };
+            });
         }
+
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            let bundled = bundled_backend_path(resource_dir);
+            if bundled.is_file() {
+                return Ok(Self {
+                    program: bundled,
+                    prefix_args: Vec::new(),
+                });
+            }
+        }
+
+        if !cfg!(debug_assertions) {
+            return Err(
+                "The packaged SysMind backend is missing. Reinstall the application from a trusted installer."
+                    .to_string(),
+            );
+        }
+
         let python = std::env::var_os("SYSMIND_PYTHON")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("python"));
-        Self {
+        Ok(Self {
             program: python,
             prefix_args: vec!["-m".to_string(), "sysmind".to_string()],
-        }
+        })
+    }
+}
+
+fn bundled_backend_path(resource_dir: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        resource_dir.join("backend").join("sysmind-backend.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        resource_dir.join("backend").join("sysmind-backend")
     }
 }
 
@@ -490,5 +525,12 @@ mod tests {
         let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"api_version":"2.0"}"#;
         let handshake = parse_handshake(line).expect("valid handshake");
         assert_ne!(handshake.api_version, EXPECTED_API_VERSION);
+    }
+
+    #[test]
+    fn bundled_backend_uses_private_resource_directory() {
+        let path = bundled_backend_path(PathBuf::from("C:/Program Files/SysMind/resources"));
+
+        assert!(path.ends_with(PathBuf::from("backend/sysmind-backend.exe")));
     }
 }

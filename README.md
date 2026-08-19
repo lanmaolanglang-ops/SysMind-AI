@@ -1,6 +1,6 @@
 # SysMind AI
 
-SysMind AI is a local-first Windows desktop foundation for an explainable computer diagnostic assistant. Phase 1 adds an auditable, read-only quick scan for Windows, CPU, GPU, memory, disks, and current processes. It still does **not** call an AI model, execute model-authored commands, manage processes, or change system state.
+SysMind AI is a local-first Windows desktop foundation for an explainable computer diagnostic assistant. Phase 6 adds a frozen Python sidecar, per-user NSIS packaging, single-instance ownership, signed in-app updates, and release integrity gates. Phase 5 controlled actions remain narrowly evidence-bound. The application does **not** execute model-authored commands, manage services, elevate privileges, or expose generic system changes.
 
 The product and architecture baseline is [docs/SysMind-AI-PRD-and-Architecture.md](docs/SysMind-AI-PRD-and-Architecture.md).
 
@@ -18,29 +18,54 @@ Tauri 2 process owner ───── starts/stops ───── Python FastAP
                                           Alembic migrations
                                                     ▲
                                                     │ inward-facing ports
-                                          Windows read-only adapters
+                                          Bounded Windows adapters
 ```
 
 The Tauri process owns the exact child process it creates. On Windows, the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`; normal exit first requests graceful backend shutdown and only terminates that owned child after a timeout. A development launcher uses Python today and the same abstraction accepts a frozen executable later.
 
-## Current Phase 1 capabilities
+## Current Phase 6 capabilities
 
 - Start, monitor, cancel, and revisit a local quick scan.
 - Collect normalized OS, CPU, GPU, memory, fixed-volume, process snapshot, and high-usage process evidence.
 - Preserve partial results when a collector is unavailable or times out.
 - Persist scan summaries and per-step audit events with collector name, version, timing, and safe error mapping.
 - Run fixture-based tests on every platform and real read-only Windows adapter/API smoke tests on Windows.
+- Query only the `Application` and `System` event channels with a 1–168 hour window, selected levels, optional event IDs, and a hard 200-record maximum.
+- Normalize and redact event evidence locally, tolerate malformed records, and preserve one channel when another is denied or unavailable.
+- Aggregate common provider/event-ID failures plus Application Error and Windows Error Reporting crashes without storing raw event XML.
+- Start, monitor, cancel, and revisit log analyses through the local API and desktop UI.
+- Run a persisted Agent task against an exact user-selected allowlist of versioned, read-only tools.
+- Stream ordered task events over reconnectable SSE and recover interrupted tasks as failed without replaying model or tool calls.
+- Enforce total time, reasoning-round, tool-call, repeated-call, per-tool concurrency, and global task-concurrency budgets.
+- Use a deterministic offline Fake Provider by default, with a tested OpenAI-compatible Chat Completions adapter available for server-side composition.
+- Keep complete tool results and call audit data local; only bounded tool summaries enter subsequent model context.
+- Classify performance, network, and application-crash questions into application-authored diagnostic plans.
+- Inspect current-user/WinHTTP proxy metadata, fixed allowlisted DNS and ICMP targets, startup sources, scheduled-task names, and Windows service metadata.
+- Generate deterministic local findings before optional model explanation; every finding references a completed tool call and field path.
+- Preserve partial reports when tools or the model fail, and explicitly list ambiguity, unavailable evidence, and other limitations.
+- Revisit report history, submit helpful/not-helpful feedback, and export redacted JSON or Markdown.
+- Generate a diagnosis-bound plan for one current-user startup item, record an explicit per-item decision, revalidate the target, verify the result, and offer conflict-safe recovery.
+- Freeze the backend with its Alembic migrations, embed it as a private Tauri resource, and refuse a release-time fallback to system Python.
+- Build a current-user NSIS installer, preserve local data across upgrades and silent uninstall, and offer explicit deletion during interactive uninstall.
+- Enforce one desktop instance and provide user-visible, signature-verified update checks with explicit install/restart.
+- Require Windows Authenticode and Tauri update-signing inputs for formal release builds while keeping every credential outside the repository.
 
 ## Safety boundary
 
 - The backend host is a validated literal `127.0.0.1`; `0.0.0.0` is rejected.
 - Every API request requires an ephemeral `X-SysMind-Session` token.
 - Browser/Tauri origins are allowlisted and correlation IDs cross the API boundary.
-- API keys are not implemented or persisted. `FakeSecretService` is memory-only.
+- Provider credentials are injected server-side only and are never accepted from the browser, persisted in SQLite, or logged. `FakeSecretService` remains memory-only.
 - Logs are structured JSON and redact common secret fields.
 - Collectors are application-owned, versioned, timeout-bounded, and read-only.
 - GPU detection uses one fixed application-authored CIM query; no user or model input reaches PowerShell.
-- No Agent, model provider, Tool Registry, arbitrary command, process management, or repair behavior exists.
+- Event Log collection uses the Windows Event Log API directly; callers cannot provide XPath, arbitrary channels, or commands.
+- Event summaries redact user-profile names, account identifiers, and IPv4 addresses before persistence. Raw event XML is not stored.
+- The Tool Registry is an exact allowlist; unknown tools, invalid arguments, state-changing risk levels, confirmation-requiring tools, and privilege-requiring tools are rejected.
+- Agent prompts treat goals and tool evidence as untrusted data. State-changing startup actions use a separate application-authored executor and cannot be selected by a model.
+- Confirmation tickets are single-use, expire within two minutes, and bind the action, target revision, parameters, and sidecar session; only their digest is audited.
+- Network tools use fixed application allowlists (`one.one.one.one`, `www.microsoft.com`, `1.1.1.1`, and `8.8.8.8`) plus hard count and timeout bounds. Starting a network diagnosis is the explicit user action that authorizes this limited traffic.
+- Provider report synthesis receives deterministic finding summaries, not complete tool results or the raw user question; provider failures fall back to local rules.
 
 ## Development requirements
 
@@ -59,7 +84,7 @@ pnpm install
 
 python -m venv services/backend/.venv
 & services/backend/.venv/Scripts/python.exe -m pip install --upgrade pip
-& services/backend/.venv/Scripts/python.exe -m pip install -e "services/backend[dev]"
+& services/backend/.venv/Scripts/python.exe -m pip install -e "services/backend[dev,packaging]"
 ```
 
 No `.env` file is required. Never put real API keys in repository environment files.
@@ -128,7 +153,40 @@ Run only the real Windows read-only smoke tests:
 
 ```powershell
 & services/backend/.venv/Scripts/pytest.exe services/backend/tests/test_windows_diagnostics.py -m windows_smoke -vv
+& services/backend/.venv/Scripts/pytest.exe services/backend/tests/test_event_logs.py -m windows_smoke -vv
 ```
+
+Phase 5A state-changing verification is excluded from the commands above. Run it only inside a
+disposable Windows Sandbox/VM that satisfies the dual safety gate documented in
+`tests/integration/README.md`:
+
+```powershell
+.\scripts\run-phase5a-isolated-tests.ps1 -ConfirmIsolatedEnvironment
+```
+
+## Build a Windows installer
+
+An unsigned package is for local validation only:
+
+```powershell
+.\scripts\package.ps1 -Version 0.1.0
+```
+
+The script runs quality gates, freezes and smoke-tests the backend without relying on system Python,
+then creates the NSIS installer. A formal release additionally requires protected Windows certificate
+and Tauri updater signing inputs and is run by `.github/workflows/release.yml`; the script fails when
+any required input is missing. Never put certificate material or private updater keys in the repo.
+
+Disposable Windows install/uninstall checks are gated in the same way as Phase 5 mutation tests:
+
+```powershell
+.\scripts\run-phase6-isolated-tests.ps1 `
+  -InstallerPath '<path-to-setup.exe>' `
+  -ConfirmIsolatedEnvironment
+```
+
+See [the release checklist](docs/release-checklist.md), [privacy notice](docs/privacy.md),
+[security model](docs/security.md), and [third-party license notes](docs/third-party-licenses.md).
 
 ## Directory guide
 
@@ -144,4 +202,4 @@ tests/integration/         Cross-process smoke-test scaffold
 .github/workflows/         CI quality gates and Windows smoke job
 ```
 
-The implemented dependency direction is `presentation -> application -> domain`; SQLAlchemy repositories and Windows adapters implement inward-facing ports. Tool Registry, Agent, model providers, state-changing process actions, and repairs remain deferred to later phases.
+The implemented dependency direction is `presentation -> application -> domain`; SQLAlchemy repositories, model providers, and Windows adapters implement inward-facing ports. Service control, privileged helpers, bulk or automatic repair, and unrestricted model-selected tools remain unavailable. Phase 5 process actions stay outside the model Tool Registry and require per-action evidence and consent.
