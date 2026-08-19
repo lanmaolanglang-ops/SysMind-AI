@@ -3,16 +3,19 @@
 No build is a production release until every required item below has evidence attached to the draft
 release. Unsigned local installers are development artifacts.
 
-## Current local preflight evidence (2026-08-20)
+## Current preflight evidence (2026-08-20)
 
 - [x] Frozen backend process contract and migration-to-head smoke test passed.
 - [x] Packaged desktop portable lifecycle passed: loopback readiness, no token in arguments,
   single-instance/no second sidecar attempt, owned-sidecar cleanup, and desktop survival after a
   ready sidecar was forcibly terminated.
 - [x] Unsigned NSIS development installer was generated and checksummed.
-- [ ] Disposable installer/uninstaller validation is pending because the current Windows 11 Home
-  host has no Windows Sandbox and no project GitHub runner is configured. Do not substitute a normal
-  workstation for the destructive/gated checks below.
+- [x] GitHub-hosted Windows CI passed backend, frontend, frozen-backend/Rust smoke, unsigned NSIS
+  packaging, portable lifecycle, and the dual-gated silent install/launch/uninstall-preserve flow on
+  commit `0e9d5ec`.
+- [ ] The current Windows 11 Home workstation still has no Windows Sandbox. Phase 5 state-changing
+  checks and the remaining manual release matrix below must use a disposable VM or equivalent
+  isolated runner; do not substitute the normal workstation.
 
 ## Source and version
 

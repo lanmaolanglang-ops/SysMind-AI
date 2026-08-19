@@ -44,8 +44,10 @@ clean Windows 10/11 VM matrix, upgrade from the prior release, interactive unins
 signature rejection, and antivirus review must then be executed and attached to the release using
 `docs/release-checklist.md`. Phase 5 state-changing tests also remain restricted to a disposable VM.
 
-The current acceptance host is Windows 11 Home and has neither Windows Sandbox nor a configured
-GitHub remote/runner. Installer, uninstall, upgrade, signature-rejection, antivirus, and Phase 5
-state-changing acceptance were therefore not executed on this workstation. The CI workflow includes
-a dual-gated GitHub-hosted Windows package/installer job as the reproducible no-local-VM alternative;
-it becomes executable after the repository is connected to GitHub.
+The local acceptance host is Windows 11 Home and has no Windows Sandbox, so destructive acceptance
+was not run on that workstation. GitHub-hosted Windows CI subsequently passed the complete backend,
+frontend, frozen-backend/Rust smoke, unsigned NSIS packaging, portable lifecycle, and dual-gated
+silent installer/launch/uninstaller-preserve flow on commit `0e9d5ec`. This validates the reproducible
+no-local-VM path. The clean Windows 10/11 matrix, supported-release upgrade, interactive uninstall
+choices, signed-update rejection, antivirus review, and Phase 5 state-changing tests remain external
+release gates.
