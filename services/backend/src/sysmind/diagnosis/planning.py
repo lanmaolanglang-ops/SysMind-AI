@@ -48,6 +48,7 @@ def plan_for(category: DiagnosisCategory) -> tuple[DiagnosticStep, ...]:
         )
     return (
         DiagnosticStep("system.cpu@1.0", {}, "采集 CPU 状态"),
+        DiagnosticStep("system.gpu@1.0", {}, "读取 GPU 与驱动元数据并标注实时指标能力"),
         DiagnosticStep("system.memory@1.0", {}, "采集内存压力"),
         DiagnosticStep("system.disks@1.0", {}, "采集固定卷容量"),
         DiagnosticStep(

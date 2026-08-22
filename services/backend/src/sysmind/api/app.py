@@ -12,9 +12,16 @@ from sysmind.api.routes.actions import router as actions_router
 from sysmind.api.routes.agent_tasks import router as agent_tasks_router
 from sysmind.api.routes.diagnoses import router as diagnoses_router
 from sysmind.api.routes.health import router as health_router
+from sysmind.api.routes.history import router as history_router
 from sysmind.api.routes.log_analyses import router as log_analyses_router
 from sysmind.api.routes.scans import router as scans_router
-from sysmind.application.services import LogAnalysisCoordinator, QuickScanCoordinator
+from sysmind.api.routes.settings import router as settings_router
+from sysmind.application.services import (
+    HistoryService,
+    LogAnalysisCoordinator,
+    ProviderSettingsService,
+    QuickScanCoordinator,
+)
 from sysmind.core.config import Settings, get_settings
 from sysmind.core.constants import API_VERSION, BACKEND_VERSION
 from sysmind.diagnosis import DiagnosisCoordinator
@@ -22,7 +29,9 @@ from sysmind.infrastructure.bootstrap import (
     create_action_coordinator,
     create_agent_task_manager,
     create_diagnosis_coordinator,
+    create_history_service,
     create_log_analysis_coordinator,
+    create_provider_settings_service,
     create_quick_scan_coordinator,
 )
 from sysmind.infrastructure.database import run_migrations
@@ -39,6 +48,8 @@ def create_app(
     agent_task_manager: AgentTaskManager | None = None,
     diagnosis_coordinator: DiagnosisCoordinator | None = None,
     action_coordinator: ActionCoordinator | None = None,
+    provider_settings_service: ProviderSettingsService | None = None,
+    history_service: HistoryService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     controller = shutdown_controller or ShutdownController()
@@ -48,6 +59,9 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved_settings.data_dir.mkdir(parents=True, exist_ok=True)
         run_migrations(resolved_settings.database_url)
+        history = history_service or create_history_service(resolved_settings.database_url)
+        app.state.history_service = history
+        history.cleanup(trigger="startup")
         coordinator = quick_scan_coordinator or create_quick_scan_coordinator(
             resolved_settings.database_url
         )
@@ -58,13 +72,17 @@ def create_app(
         )
         app.state.log_analysis_coordinator = log_coordinator
         log_coordinator.recover_interrupted()
-        task_manager = agent_task_manager or create_agent_task_manager(
+        provider_settings = provider_settings_service or create_provider_settings_service(
             resolved_settings.database_url
+        )
+        app.state.provider_settings_service = provider_settings
+        task_manager = agent_task_manager or create_agent_task_manager(
+            resolved_settings.database_url, provider_settings
         )
         app.state.agent_task_manager = task_manager
         task_manager.recover_interrupted()
         diagnoses = diagnosis_coordinator or create_diagnosis_coordinator(
-            resolved_settings.database_url
+            resolved_settings.database_url, provider_settings
         )
         app.state.diagnosis_coordinator = diagnoses
         diagnoses.recover_interrupted()
@@ -98,7 +116,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=list(resolved_settings.origin_allowlist),
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=[
             "Content-Type",
             "X-SysMind-Session",
@@ -113,4 +131,6 @@ def create_app(
     app.include_router(agent_tasks_router)
     app.include_router(diagnoses_router)
     app.include_router(actions_router)
+    app.include_router(settings_router)
+    app.include_router(history_router)
     return app

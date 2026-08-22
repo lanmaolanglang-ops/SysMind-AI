@@ -83,19 +83,31 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     if (!activeScanId) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
+    let disposed = false;
+    let timer: number | undefined;
+    let delay = 800;
+    const poll = () => {
       void getScan(client, activeScanId, controller.signal)
         .then((next) => {
-          setScan(next);
+          setScan((current) => (current?.id === activeScanId ? next : current));
           setError(null);
+          delay = 800;
         })
         .catch((reason: unknown) => {
-          if (!controller.signal.aborted) setError(normalizeError(reason));
+          if (!controller.signal.aborted) {
+            setError(normalizeError(reason));
+            delay = Math.min(delay * 2, 4_000);
+          }
+        })
+        .finally(() => {
+          if (!disposed) timer = window.setTimeout(poll, delay);
         });
-    }, 350);
+    };
+    timer = window.setTimeout(poll, delay);
     return () => {
+      disposed = true;
       controller.abort();
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [activeScanId, client]);
 

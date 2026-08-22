@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import ipaddress
 import os
 import socket
 import time
@@ -25,6 +26,7 @@ from sysmind.tools.contracts import ToolCancelledError, ToolUnavailableError
 
 _DNS_DOMAINS = {"one.one.one.one", "www.microsoft.com"}
 _PING_TARGETS = {"1.1.1.1", "8.8.8.8"}
+_IP_SUCCESS = 0
 
 
 class _WinHttpProxyInfo(ctypes.Structure):
@@ -94,6 +96,42 @@ def _registry_dns_servers() -> tuple[str, ...]:
     return tuple(sorted(found))[:8]
 
 
+def _registry_default_gateways() -> tuple[str, ...] | None:
+    if os.name != "nt":
+        return None
+    import winreg
+
+    found: set[str] = set()
+    path = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as root:
+            for index in range(winreg.QueryInfoKey(root)[0]):
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, index)) as interface:
+                        for name in ("DefaultGateway", "DhcpDefaultGateway"):
+                            try:
+                                raw, _ = winreg.QueryValueEx(interface, name)
+                            except OSError:
+                                continue
+                            values = raw if isinstance(raw, list) else str(raw).split()
+                            for value in values:
+                                try:
+                                    address = ipaddress.ip_address(str(value).strip())
+                                except ValueError:
+                                    continue
+                                if address.version == 4 and not address.is_unspecified:
+                                    found.add(str(address))
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return tuple(sorted(found))
+
+
+def _icmp_reply_succeeded(reply: Any) -> bool:
+    return int.from_bytes(reply.raw[4:8], "little") == _IP_SUCCESS
+
+
 class WindowsNetworkProbe:
     def proxy_configuration(self) -> ProxyConfiguration:
         if os.name != "nt":
@@ -146,6 +184,11 @@ class WindowsNetworkProbe:
     def ping(self, target: str, count: int, timeout_ms: int, cancel_event: Event) -> PingResult:
         if target not in _PING_TARGETS:
             raise ValueError("Ping target is outside the application allowlist.")
+        return self._ping_ipv4(target, count, timeout_ms, cancel_event)
+
+    def _ping_ipv4(
+        self, target: str, count: int, timeout_ms: int, cancel_event: Event
+    ) -> PingResult:
         if os.name != "nt":
             raise ToolUnavailableError("Windows ICMP is unavailable.")
         iphlpapi = ctypes.WinDLL("iphlpapi.dll")
@@ -185,7 +228,7 @@ class WindowsNetworkProbe:
                     len(reply),
                     timeout_ms,
                 )
-                if result:
+                if result and _icmp_reply_succeeded(reply):
                     durations.append(int.from_bytes(reply.raw[8:12], "little"))
         finally:
             iphlpapi.IcmpCloseHandle(handle)
@@ -212,13 +255,30 @@ class WindowsNetworkProbe:
             failures.append("icmp_unavailable")
         adapters = [name for name, values in psutil.net_if_addrs().items() if values]
         stats = psutil.net_if_stats()
+        active_adapters = [name for name in adapters if stats.get(name) and stats[name].isup]
+        gateways = _registry_default_gateways()
+        gateway = gateways[0] if gateways else None
+        gateway_reachable: bool | None = None
+        if gateway is not None:
+            try:
+                gateway_reachable = (
+                    self._ping_ipv4(gateway, 1, 750, cancel_event).received > 0
+                )
+            except ToolUnavailableError:
+                failures.append("gateway_icmp_unavailable")
+        elif active_adapters and gateways is None:
+            failures.append("default_route_unavailable")
         return NetworkDiagnosis(
             len(adapters),
-            any(stats.get(name) and stats[name].isup for name in adapters),
+            (None if gateways is None else bool(gateway)) if active_adapters else False,
             dns,
             ping,
             proxy,
             tuple(failures),
+            len(active_adapters),
+            gateway,
+            gateway_reachable,
+            ping.received > 0 if ping is not None else None,
         )
 
 
@@ -258,6 +318,16 @@ class WindowsStartupProbe:
             folder = Path(root) / "Microsoft/Windows/Start Menu/Programs/Startup"
             try:
                 for entry in list(folder.iterdir())[:100]:
+                    try:
+                        attributes = entry.lstat().st_file_attributes
+                    except (AttributeError, OSError):
+                        attributes = 0
+                    if (
+                        not entry.is_file()
+                        or entry.is_symlink()
+                        or attributes & 0x400
+                    ):
+                        continue
                     items.append(StartupItem(entry.stem, source, source, entry.name))
             except OSError:
                 continue

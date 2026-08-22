@@ -20,6 +20,51 @@ class AppMetadata(Base):
     )
 
 
+class ProviderSettingsModel(Base):
+    __tablename__ = "provider_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
+    secret_reference: Mapped[str | None] = mapped_column(String(120))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProviderConnectionTestModel(Base):
+    __tablename__ = "provider_connection_tests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DataRetentionPolicyModel(Base):
+    __tablename__ = "data_retention_policy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DataCleanupRunModel(Base):
+    __tablename__ = "data_cleanup_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trigger: Mapped[str] = mapped_column(String(30), nullable=False)
+    cutoff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    target_kind: Mapped[str | None] = mapped_column(String(30))
+    target_id: Mapped[str | None] = mapped_column(String(36))
+    deleted_scans: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deleted_diagnoses: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deleted_log_analyses: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    protected_records: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SystemScan(Base):
     __tablename__ = "system_scans"
 

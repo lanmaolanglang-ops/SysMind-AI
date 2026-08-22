@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import time
 from threading import Event
@@ -8,6 +9,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sysmind.windows import WindowsNetworkProbe, WindowsServiceProbe, WindowsStartupProbe
+from sysmind.windows.platform_inspection import _icmp_reply_succeeded
+
+
+def test_icmp_reply_status_must_be_success() -> None:
+    success = ctypes.create_string_buffer(32)
+    failure = ctypes.create_string_buffer(32)
+    failure[4:8] = (11010).to_bytes(4, "little")
+
+    assert _icmp_reply_succeeded(success)
+    assert not _icmp_reply_succeeded(failure)
 
 
 @pytest.mark.windows_smoke

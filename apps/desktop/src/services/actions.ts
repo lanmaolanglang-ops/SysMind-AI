@@ -85,6 +85,14 @@ export function rejectAction(client: ApiClient, actionId: string) {
   return client.post<ControlledAction>(`/api/v1/actions/${actionId}/reject`);
 }
 
+export function getAction(client: ApiClient, actionId: string, signal?: AbortSignal) {
+  return client.get<ControlledAction>(`/api/v1/actions/${actionId}`, signal);
+}
+
+export function recentActions(client: ApiClient, signal?: AbortSignal) {
+  return client.get<{ items: ControlledAction[] }>("/api/v1/actions", signal);
+}
+
 export async function confirmAndExecute(client: ApiClient, action: ControlledAction) {
   const consent = await client.post<{
     action: ControlledAction;
@@ -97,5 +105,7 @@ export async function confirmAndExecute(client: ApiClient, action: ControlledAct
   return client.postJson<ControlledAction, { ticket: string }>(
     `/api/v1/actions/${action.id}/execute`,
     { ticket: consent.ticket },
+    undefined,
+    12_000,
   );
 }

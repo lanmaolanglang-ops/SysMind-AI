@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Protocol
 
 from sysmind.agent.contracts import AgentProvider, ProviderRequest
@@ -77,4 +78,5 @@ class ProviderReportExplainer:
         )
         if response.action.type != "finalize" or not response.action.content:
             raise ValueError("Provider did not return a report explanation.")
-        return response.action.content[:4000]
+        # UI renders this as text, but also remove control characters before persistence/export.
+        return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", response.action.content)[:4000]

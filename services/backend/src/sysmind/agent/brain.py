@@ -20,6 +20,7 @@ from sysmind.agent.contracts import (
 from sysmind.agent.memory import WorkingMemory, call_signature
 from sysmind.application.ports.agent_tasks import AgentTaskRepository
 from sysmind.domain.agent_tasks import AgentEventType, AgentTaskRecord, AgentTaskStatus
+from sysmind.security.redaction import is_sensitive_key
 from sysmind.tools.executor import ToolExecutionResult, ToolExecutor, arguments_hash
 from sysmind.tools.registry import ToolRegistry
 
@@ -36,9 +37,8 @@ def _hash(value: object) -> str:
 def _audit_arguments(arguments: dict[str, object], *, registered: bool) -> dict[str, object]:
     if not registered:
         return {"rejected_unregistered_arguments": True}
-    sensitive_keys = {"authorization", "api_key", "token", "password", "secret", "command"}
     return {
-        key: "[REDACTED]" if key.casefold() in sensitive_keys else value
+        key: "[REDACTED]" if is_sensitive_key(key) or key.casefold() == "command" else value
         for key, value in arguments.items()
     }
 

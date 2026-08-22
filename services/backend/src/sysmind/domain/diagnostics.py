@@ -33,6 +33,12 @@ class GpuInfo:
     name: str
     memory_bytes: int | None
     driver_version: str | None
+    telemetry_available: bool = False
+    utilization_percent: float | None = None
+    memory_used_bytes: int | None = None
+    telemetry_limitation: str | None = (
+        "Real-time GPU utilization is unavailable from the metadata-only Windows adapter."
+    )
 
 
 @dataclass(frozen=True, slots=True)

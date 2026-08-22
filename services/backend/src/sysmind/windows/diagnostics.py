@@ -4,6 +4,7 @@ import json
 import platform
 import shutil
 import subprocess
+import time
 from collections.abc import Sequence
 from threading import Event
 from typing import Any
@@ -101,17 +102,34 @@ class WindowsSystemProbe:
         raw = completed.stdout.strip()
         if not raw:
             return ()
-        payload: Any = json.loads(raw)
+        try:
+            payload: Any = json.loads(raw)
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            raise ToolUnavailableError("Windows returned invalid GPU information.") from error
         rows = payload if isinstance(payload, list) else [payload]
-        return tuple(
-            GpuInfo(
-                name=str(row.get("Name") or "Unknown GPU"),
-                memory_bytes=int(row["AdapterRAM"]) if row.get("AdapterRAM") is not None else None,
-                driver_version=(str(row["DriverVersion"]) if row.get("DriverVersion") else None),
-            )
-            for row in rows
-            if isinstance(row, dict)
-        )
+        results: list[GpuInfo] = []
+        try:
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                raw_memory = row.get("AdapterRAM")
+                memory = int(raw_memory) if raw_memory is not None else None
+                if memory in {0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF} or (
+                    memory is not None and memory < 0
+                ):
+                    memory = None
+                results.append(
+                    GpuInfo(
+                        name=str(row.get("Name") or "Unknown GPU"),
+                        memory_bytes=memory,
+                        driver_version=(
+                            str(row["DriverVersion"]) if row.get("DriverVersion") else None
+                        ),
+                    )
+                )
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ToolUnavailableError("Windows returned invalid GPU information.") from error
+        return tuple(results)
 
     def memory(self) -> MemoryStatus:
         value = psutil.virtual_memory()
@@ -158,8 +176,35 @@ class WindowsProcessProbe:
         except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
             return None
 
-    def snapshot(self, limit: int = 200) -> Sequence[ProcessInfo]:
-        items = [item for process in psutil.process_iter() if (item := self._read_process(process))]
+    @staticmethod
+    def _prime(processes: Sequence[psutil.Process]) -> tuple[psutil.Process, ...]:
+        primed: list[psutil.Process] = []
+        for process in processes:
+            try:
+                process.cpu_percent(interval=None)
+                primed.append(process)
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+        return tuple(primed)
+
+    @staticmethod
+    def _wait(cancel_event: Event | None, sample_seconds: float) -> None:
+        if cancel_event is not None:
+            if cancel_event.wait(sample_seconds):
+                raise ToolCancelledError("Process sampling was cancelled.")
+        else:
+            time.sleep(sample_seconds)
+
+    def snapshot(
+        self,
+        limit: int = 200,
+        cancel_event: Event | None = None,
+        *,
+        sample_seconds: float = 0.15,
+    ) -> Sequence[ProcessInfo]:
+        processes = self._prime(tuple(psutil.process_iter()))
+        self._wait(cancel_event, sample_seconds)
+        items = [item for process in processes if (item := self._read_process(process))]
         items.sort(key=lambda item: (item.memory_bytes, item.cpu_percent), reverse=True)
         return tuple(items[:limit])
 
@@ -172,14 +217,8 @@ class WindowsProcessProbe:
         memory_threshold: float = 10.0,
         limit: int = 20,
     ) -> Sequence[ProcessInfo]:
-        processes = list(psutil.process_iter())
-        for process in processes:
-            try:
-                process.cpu_percent(interval=None)
-            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
-                continue
-        if cancel_event.wait(sample_seconds):
-            raise ToolCancelledError("Process sampling was cancelled.")
+        processes = self._prime(tuple(psutil.process_iter()))
+        self._wait(cancel_event, sample_seconds)
         items = [item for process in processes if (item := self._read_process(process))]
         matches = [
             item

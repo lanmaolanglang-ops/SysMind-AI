@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiClient } from "../../services/api-client";
+import { ApiClient, ApiClientError } from "../../services/api-client";
 import { ControlledActions } from "./ControlledActions";
 
 function api() {
@@ -101,5 +101,30 @@ describe("ControlledActions", () => {
     fireEvent.click(screen.getByRole("button", { name: "再次确认并强制终止" }));
     expect(await screen.findByText("应用已强制终止并验证")).toBeInTheDocument();
     expect(post).toHaveBeenCalledTimes(4);
+  });
+
+  it("queries status after an unknown network result without retrying execution", async () => {
+    const client = api();
+    const get = vi.spyOn(client, "get")
+      .mockResolvedValueOnce({
+        items: [{ item_id: "a".repeat(64), name: "Example", source_kind: "user_run",
+          command_name: "example.exe", observed_revision: "b".repeat(64) }],
+      })
+      .mockResolvedValueOnce({ ...proposed, status: "succeeded", recovery_available: true });
+    vi.spyOn(client, "post").mockResolvedValue({
+      action: { ...proposed, status: "confirmed" }, ticket: "ticket", expires_at: "soon",
+    });
+    const postJson = vi.spyOn(client, "postJson")
+      .mockResolvedValueOnce(proposed)
+      .mockRejectedValueOnce(new ApiClientError("network_error", "disconnected"));
+    render(<ControlledActions client={client} diagnosisId="diagnosis-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "查看启动项" }));
+    fireEvent.click(await screen.findByRole("button", { name: "生成禁用计划" }));
+    fireEvent.click(await screen.findByRole("button", { name: "我已了解，确认禁用" }));
+
+    expect(await screen.findByText("启动项已禁用并验证")).toBeInTheDocument();
+    expect(postJson).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledWith("/api/v1/actions/action-1", expect.any(AbortSignal));
   });
 });

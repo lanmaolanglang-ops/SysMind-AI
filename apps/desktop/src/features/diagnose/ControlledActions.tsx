@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import type { ApiClient } from "../../services/api-client";
+import { ApiClientError, type ApiClient } from "../../services/api-client";
 import {
   actionCandidates,
   confirmAndExecute,
@@ -8,6 +8,7 @@ import {
   createProcessCloseAction,
   createProcessTermination,
   createRecoveryAction,
+  getAction,
   processActionCandidates,
   rejectAction,
   type ControlledAction,
@@ -22,14 +23,44 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   const [original, setOriginal] = useState<ControlledAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const diagnosisRef = useRef(diagnosisId);
+  const statusController = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    diagnosisRef.current = diagnosisId;
+    statusController.current?.abort();
     setCandidates(null);
     setAction(null);
     setProcesses(null);
     setOriginal(null);
     setMessage(null);
+    return () => statusController.current?.abort();
   }, [diagnosisId]);
+
+  const reconcileUnknownResult = async (actionId: string, expectedDiagnosisId: string) => {
+    const controller = new AbortController();
+    statusController.current?.abort();
+    statusController.current = controller;
+    setMessage("连接中断，操作结果未知；正在查询审计状态，不会自动重试操作。");
+    for (let attempt = 0; attempt < 8 && !controller.signal.aborted; attempt += 1) {
+      try {
+        const result = await getAction(client, actionId, controller.signal);
+        if (diagnosisRef.current !== expectedDiagnosisId) return;
+        setAction(result);
+        if (result.status !== "executing" && result.status !== "verifying") {
+          setMessage(null);
+          return;
+        }
+      } catch (error: unknown) {
+        if (controller.signal.aborted) return;
+        if (!(error instanceof ApiClientError)) break;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+    }
+    if (!controller.signal.aborted && diagnosisRef.current === expectedDiagnosisId) {
+      setMessage("仍无法确认操作结果。请保持应用开启并稍后刷新动作状态；不要重复提交。");
+    }
+  };
 
   const load = () => {
     setBusy(true);
@@ -65,15 +96,27 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
 
   const execute = () => {
     if (!action) return;
+    const executingAction = action;
+    const expectedDiagnosisId = diagnosisId;
     setBusy(true);
-    void confirmAndExecute(client, action)
+    setMessage(null);
+    void confirmAndExecute(client, executingAction)
       .then((result) => {
         setAction(result);
         if (result.tool_name === "startup.disable_current_user" && result.status === "succeeded") {
           setOriginal(result);
         }
       })
-      .catch(() => setMessage("确认已过期或执行请求被拒绝；系统没有自动重试。"))
+      .catch((error: unknown) => {
+        if (
+          error instanceof ApiClientError &&
+          ["request_timeout", "network_error", "request_cancelled"].includes(error.code)
+        ) {
+          void reconcileUnknownResult(executingAction.id, expectedDiagnosisId);
+          return;
+        }
+        setMessage("确认已过期或执行请求被拒绝；系统没有自动重试。");
+      })
       .finally(() => setBusy(false));
   };
 

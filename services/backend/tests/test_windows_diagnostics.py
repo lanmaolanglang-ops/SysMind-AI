@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,6 +39,57 @@ def test_gpu_parser_uses_fixed_application_command(monkeypatch: pytest.MonkeyPat
 
     assert result[0].name == "Fixture GPU"
     assert result[0].memory_bytes == 4096
+
+
+def test_gpu_parser_normalizes_unknown_memory_and_invalid_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, '{"Name":"Fixture GPU","AdapterRAM":4294967295}', ""
+        ),
+    )
+    assert WindowsSystemProbe(powershell_path="powershell.exe").gpus()[0].memory_bytes is None
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "not-json", ""),
+    )
+    with pytest.raises(Exception, match="invalid GPU information"):
+        WindowsSystemProbe(powershell_path="powershell.exe").gpus()
+
+
+def test_process_snapshot_primes_all_processes_before_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 42
+
+        def cpu_percent(self, interval: object = None) -> float:
+            calls.append((self.pid, len(calls)))
+            return 0.0 if len(calls) == 1 else 320.0
+
+        def memory_info(self) -> object:
+            return SimpleNamespace(rss=1024)
+
+        def memory_percent(self) -> float:
+            return 1.0
+
+        def name(self) -> str:
+            return "busy.exe"
+
+    monkeypatch.setattr("sysmind.windows.diagnostics.psutil.process_iter", lambda: [FakeProcess()])
+    monkeypatch.setattr("sysmind.windows.diagnostics.psutil.cpu_count", lambda logical=True: 8)
+
+    result = WindowsProcessProbe().snapshot(sample_seconds=0)
+
+    assert len(calls) == 2
+    assert result[0].cpu_percent == 40.0
 
 
 @pytest.mark.windows_smoke

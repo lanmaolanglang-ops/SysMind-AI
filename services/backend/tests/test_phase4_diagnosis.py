@@ -28,6 +28,7 @@ class AnyInput(BaseModel):
 
 RESULTS: dict[str, object] = {
     "system.cpu": {"utilization_percent": 92.0},
+    "system.gpu": [{"name": "Fixture GPU", "driver_version": "1.2.3"}],
     "system.memory": {"utilization_percent": 44.0},
     "system.disks": [{"utilization_percent": 95.0}],
     "process.high_usage": [{"name": "game.exe", "cpu_percent": 80.0}],

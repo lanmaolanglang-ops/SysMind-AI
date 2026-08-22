@@ -146,9 +146,27 @@ def build_findings(
                     "$.enabled",
                 )
             )
+        elif call.tool_name == "system.gpu" and isinstance(result, list) and result:
+            findings.append(
+                _finding(
+                    "gpu_metadata_only",
+                    "info",
+                    "GPU 实时负载当前不可用",
+                    "已读取显卡与驱动元数据，但当前适配器没有可靠的实时利用率或显存压力。",
+                    "如问题涉及掉帧，请结合厂商监控工具复测；本报告不会从元数据推测负载。",
+                    0.98,
+                    call,
+                    "$",
+                )
+            )
         elif call.tool_name == "network.diagnose" and isinstance(result, dict):
             ping = result.get("ping")
-            if result.get("has_default_route") is False:
+            active_adapter_count = result.get("active_adapter_count")
+            if active_adapter_count is None:
+                active_adapter_count = (
+                    result.get("adapter_count", 0) if result.get("has_default_route") else 0
+                )
+            if int(cast(int | str, active_adapter_count)) == 0:
                 findings.append(
                     _finding(
                         "no_active_adapter",
@@ -158,7 +176,33 @@ def build_findings(
                         "检查飞行模式、网卡状态和物理连接。",
                         0.92,
                         call,
+                        "$.active_adapter_count",
+                    )
+                )
+            elif result.get("has_default_route") is False:
+                findings.append(
+                    _finding(
+                        "no_default_route",
+                        "high",
+                        "未检测到默认路由",
+                        "存在活动网络适配器，但未发现可用的默认网关配置。",
+                        "检查 IP 与默认网关配置，或重新连接当前网络。",
+                        0.9,
+                        call,
                         "$.has_default_route",
+                    )
+                )
+            elif result.get("gateway_reachable") is False:
+                findings.append(
+                    _finding(
+                        "gateway_unreachable",
+                        "high",
+                        "默认网关未响应",
+                        "已发现默认路由，但受限 ICMP 检查未收到成功状态回复。",
+                        "检查本机链路、无线连接或路由器状态；网关也可能禁用 ICMP。",
+                        0.76,
+                        call,
+                        "$.gateway_reachable",
                     )
                 )
             if result.get("dns") is None:
@@ -174,6 +218,26 @@ def build_findings(
                         "$.dns",
                     )
                 )
+                if result.get("gateway_reachable") is True:
+                    findings.append(
+                        Finding(
+                            id=str(uuid.uuid4()),
+                            code="dns_failure_after_gateway_success",
+                            severity="high",
+                            title="本地链路可达但 DNS 解析失败",
+                            explanation=(
+                                "默认网关检查成功，而固定域名解析未完成，故障更接近 DNS 层。"
+                            ),
+                            recommendation=(
+                                "核对网卡 DNS 服务器配置，并尝试受信任的备用 DNS 后复测。"
+                            ),
+                            confidence=0.88,
+                            evidence=(
+                                EvidenceReference(call.id, "$.gateway_reachable"),
+                                EvidenceReference(call.id, "$.dns"),
+                            ),
+                        )
+                    )
             if isinstance(ping, dict) and float(ping.get("loss_percent", 0)) >= 50:
                 findings.append(
                     _finding(

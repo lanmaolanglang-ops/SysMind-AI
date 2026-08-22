@@ -5,6 +5,9 @@ import { LogAnalysisPanel } from "../features/logs/LogAnalysisPanel";
 import { AgentTaskPanel } from "../features/tasks/AgentTaskPanel";
 import { DiagnosisPanel } from "../features/diagnose/DiagnosisPanel";
 import { UpdatePanel } from "../features/updates/UpdatePanel";
+import { SettingsPanel } from "../features/settings/SettingsPanel";
+import { PanelErrorBoundary } from "../components/PanelErrorBoundary";
+import { HistoryPanel } from "../features/history/HistoryPanel";
 import {
   BackendConnectionError,
   connectToBackend,
@@ -104,11 +107,13 @@ export function App() {
               </div>
             </dl>
           </div>
-          <UpdatePanel />
-          <DiagnosisPanel client={state.connection.client} />
-          <QuickScanPanel client={state.connection.client} />
-          <LogAnalysisPanel client={state.connection.client} />
-          <AgentTaskPanel client={state.connection.client} />
+          <PanelErrorBoundary name="更新"><UpdatePanel /></PanelErrorBoundary>
+          <PanelErrorBoundary name="设置"><SettingsPanel client={state.connection.client} /></PanelErrorBoundary>
+          <PanelErrorBoundary name="诊断"><DiagnosisPanel client={state.connection.client} /></PanelErrorBoundary>
+          <PanelErrorBoundary name="快速扫描"><QuickScanPanel client={state.connection.client} /></PanelErrorBoundary>
+          <PanelErrorBoundary name="日志分析"><LogAnalysisPanel client={state.connection.client} /></PanelErrorBoundary>
+          <PanelErrorBoundary name="历史"><HistoryPanel client={state.connection.client} /></PanelErrorBoundary>
+          <PanelErrorBoundary name="Agent 任务"><AgentTaskPanel client={state.connection.client} /></PanelErrorBoundary>
         </section>
       ) : (
         <section className="workspace" aria-labelledby="workspace-title">

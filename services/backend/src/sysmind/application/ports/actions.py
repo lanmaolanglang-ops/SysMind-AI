@@ -12,6 +12,10 @@ from sysmind.domain.actions import (
 )
 
 
+class TargetChangedError(RuntimeError):
+    """The action target no longer matches the evidence-bound revision."""
+
+
 class StartupActionAdapter(Protocol):
     def candidates(self) -> Sequence[StartupActionCandidate]: ...
     def disable(self, item_id: str, observed_revision: str) -> MutationResult: ...

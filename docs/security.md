@@ -1,6 +1,16 @@
 # SysMind AI security model
 
-Last updated: 2026-08-20
+Last updated: 2026-08-22
+
+## Provider credentials
+
+- Production Windows builds store the OpenAI-compatible API key as a current-user Generic
+  Credential under the fixed `SysMindAI/provider.api_key` target.
+- SQLite stores only the provider, model, HTTPS-or-loopback endpoint, and opaque secret reference.
+- Settings reads never return credential material. Connection-test audit rows contain only provider,
+  outcome, stable error code, duration, and timestamp.
+- Provider requests are created only in backend memory. Authorization headers and full response
+  bodies are excluded from application logs and audit rows.
 
 ## Trust boundaries
 
@@ -34,6 +44,14 @@ Last updated: 2026-08-20
 Phase 6 targets Windows 10/11 x64 and per-user installation. It adds no administrator helper, service
 control, arbitrary file deletion, generic registry writes, network changes, or command execution.
 Downgrades are unsupported because database migrations are forward-only.
+
+## History deletion and retention
+
+- Only terminal read-only scans, diagnoses, and log analyses are deletion candidates.
+- Deletion requires the exact SHA-256 revision returned by the impact preview; stale requests fail.
+- Diagnoses referenced by an action plan are protected from manual and retention deletion.
+- Cleanup runs append count-only audit summaries and never include report bodies.
+- Baselines use at most ten completed local scan summaries and do not infer missing telemetry.
 
 ## Vulnerability handling
 

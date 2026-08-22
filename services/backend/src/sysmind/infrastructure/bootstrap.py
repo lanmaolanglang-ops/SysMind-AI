@@ -1,18 +1,33 @@
+import os
 from pathlib import Path
 
 from sysmind.actions import ActionCoordinator
+from sysmind.agent.contracts import AgentProvider
 from sysmind.agent.providers import FakeProvider
-from sysmind.application.services import LogAnalysisCoordinator, QuickScanCoordinator
+from sysmind.application.ports.secrets import SecretService
+from sysmind.application.services import (
+    HistoryService,
+    LogAnalysisCoordinator,
+    ProviderSettingsService,
+    QuickScanCoordinator,
+)
 from sysmind.diagnosis import DiagnosisCoordinator
 from sysmind.infrastructure.database import create_session_factory
 from sysmind.infrastructure.database.repositories import (
     SqlAlchemyActionRepository,
     SqlAlchemyAgentTaskRepository,
     SqlAlchemyDiagnosisRepository,
+    SqlAlchemyHistoryRepository,
     SqlAlchemyLogAnalysisRepository,
+    SqlAlchemyProviderSettingsRepository,
     SqlAlchemyScanRepository,
 )
-from sysmind.prompts import LocalReportExplainer
+from sysmind.infrastructure.secrets import FakeSecretService, WindowsCredentialSecretService
+from sysmind.prompts import (
+    LocalReportExplainer,
+    ProviderReportExplainer,
+    ReportExplainer,
+)
 from sysmind.security import ConsentService
 from sysmind.tasks import AgentTaskManager
 from sysmind.tools.log import LogTools
@@ -45,7 +60,23 @@ def create_log_analysis_coordinator(database_url: str) -> LogAnalysisCoordinator
     return LogAnalysisCoordinator(repository, LogTools(WindowsEventLogProbe()))
 
 
-def create_agent_task_manager(database_url: str) -> AgentTaskManager:
+def create_provider_settings_service(
+    database_url: str, secrets: SecretService | None = None
+) -> ProviderSettingsService:
+    if secrets is None:
+        secrets = WindowsCredentialSecretService() if os.name == "nt" else FakeSecretService()
+    return ProviderSettingsService(
+        SqlAlchemyProviderSettingsRepository(create_session_factory(database_url)), secrets
+    )
+
+
+def create_history_service(database_url: str) -> HistoryService:
+    return HistoryService(SqlAlchemyHistoryRepository(create_session_factory(database_url)))
+
+
+def create_agent_task_manager(
+    database_url: str, provider_settings: ProviderSettingsService | None = None
+) -> AgentTaskManager:
     repository = SqlAlchemyAgentTaskRepository(create_session_factory(database_url))
     registry = build_runtime_registry(
         WindowsSystemProbe(),
@@ -55,10 +86,20 @@ def create_agent_task_manager(database_url: str) -> AgentTaskManager:
         WindowsStartupProbe(),
         WindowsServiceProbe(),
     )
-    return AgentTaskManager(repository, registry, FakeProvider)
+
+    def provider_factory() -> AgentProvider:
+        if provider_settings is not None:
+            provider = provider_settings.configured_provider()
+            if provider is not None:
+                return provider
+        return FakeProvider()
+
+    return AgentTaskManager(repository, registry, provider_factory)
 
 
-def create_diagnosis_coordinator(database_url: str) -> DiagnosisCoordinator:
+def create_diagnosis_coordinator(
+    database_url: str, provider_settings: ProviderSettingsService | None = None
+) -> DiagnosisCoordinator:
     repository = SqlAlchemyDiagnosisRepository(create_session_factory(database_url))
     registry = build_runtime_registry(
         WindowsSystemProbe(),
@@ -68,7 +109,15 @@ def create_diagnosis_coordinator(database_url: str) -> DiagnosisCoordinator:
         WindowsStartupProbe(),
         WindowsServiceProbe(),
     )
-    return DiagnosisCoordinator(repository, registry, LocalReportExplainer)
+
+    def explainer_factory() -> ReportExplainer:
+        if provider_settings is not None:
+            provider = provider_settings.configured_provider()
+            if provider is not None:
+                return ProviderReportExplainer(provider)
+        return LocalReportExplainer()
+
+    return DiagnosisCoordinator(repository, registry, explainer_factory)
 
 
 def create_action_coordinator(

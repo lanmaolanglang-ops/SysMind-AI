@@ -68,19 +68,31 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     if (!activeId) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
+    let disposed = false;
+    let timer: number | undefined;
+    let delay = 800;
+    const poll = () => {
       void getLogAnalysis(client, activeId, controller.signal)
         .then((next) => {
-          setRecord(next);
+          setRecord((current) => (current?.id === activeId ? next : current));
           setError(null);
+          delay = 800;
         })
         .catch((reason: unknown) => {
-          if (!controller.signal.aborted) setError(errorCopy(reason));
+          if (!controller.signal.aborted) {
+            setError(errorCopy(reason));
+            delay = Math.min(delay * 2, 4_000);
+          }
+        })
+        .finally(() => {
+          if (!disposed) timer = window.setTimeout(poll, delay);
         });
-    }, 350);
+    };
+    timer = window.setTimeout(poll, delay);
     return () => {
+      disposed = true;
       controller.abort();
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [activeId, client]);
 

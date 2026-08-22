@@ -30,7 +30,9 @@ class SystemProbe(Protocol):
 
 
 class ProcessProbe(Protocol):
-    def snapshot(self, limit: int = 200) -> Sequence[ProcessInfo]: ...
+    def snapshot(
+        self, limit: int = 200, cancel_event: Event | None = None
+    ) -> Sequence[ProcessInfo]: ...
 
     def high_usage(
         self,

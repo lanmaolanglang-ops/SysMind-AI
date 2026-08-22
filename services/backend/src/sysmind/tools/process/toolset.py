@@ -18,6 +18,6 @@ class ProcessTools:
 
     def handlers(self, cancel_event: Event) -> dict[str, Callable[[], object]]:
         return {
-            "process.snapshot": self._probe.snapshot,
+            "process.snapshot": lambda: self._probe.snapshot(cancel_event=cancel_event),
             "process.high_usage": lambda: self._probe.high_usage(cancel_event),
         }

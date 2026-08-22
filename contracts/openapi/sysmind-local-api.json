@@ -1288,6 +1288,332 @@
           }
         }
       }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get Settings",
+        "operationId": "get_settings_api_v1_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Update Settings",
+        "operationId": "update_settings_api_v1_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/credential": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Clear Credential",
+        "operationId": "clear_credential_api_v1_settings_credential_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Test Provider",
+        "operationId": "test_provider_api_v1_providers_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderTestResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/baseline": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Baseline",
+        "operationId": "baseline_api_v1_history_baseline_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaselineResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/retention": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Retention",
+        "operationId": "retention_api_v1_history_retention_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionPolicyResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Update Retention",
+        "operationId": "update_retention_api_v1_history_retention_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRetentionPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionPolicyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/cleanup": {
+      "post": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Cleanup",
+        "operationId": "cleanup_api_v1_history_cleanup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/{kind}/{record_id}/deletion-impact": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Deletion Impact",
+        "operationId": "deletion_impact_api_v1_history__kind___record_id__deletion_impact_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "scan",
+                "diagnosis",
+                "log"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionImpactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/{kind}/{record_id}/delete": {
+      "post": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Delete History",
+        "operationId": "delete_history_api_v1_history__kind___record_id__delete_post",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "scan",
+                "diagnosis",
+                "log"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmDeletionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1745,6 +2071,55 @@
         ],
         "title": "AgentToolCallDto"
       },
+      "BaselineMetricResponse": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          },
+          "median": {
+            "type": "number",
+            "title": "Median"
+          },
+          "latest": {
+            "type": "number",
+            "title": "Latest"
+          },
+          "delta": {
+            "type": "number",
+            "title": "Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "samples",
+          "median",
+          "latest",
+          "delta"
+        ],
+        "title": "BaselineMetricResponse"
+      },
+      "BaselineResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BaselineMetricResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "BaselineResponse"
+      },
       "CandidateListResponse": {
         "properties": {
           "items": {
@@ -1829,6 +2204,56 @@
           "available"
         ],
         "title": "CapabilityDto"
+      },
+      "CleanupResponse": {
+        "properties": {
+          "deleted_scans": {
+            "type": "integer",
+            "title": "Deleted Scans"
+          },
+          "deleted_diagnoses": {
+            "type": "integer",
+            "title": "Deleted Diagnoses"
+          },
+          "deleted_log_analyses": {
+            "type": "integer",
+            "title": "Deleted Log Analyses"
+          },
+          "protected_records": {
+            "type": "integer",
+            "title": "Protected Records"
+          },
+          "completed_at": {
+            "type": "string",
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted_scans",
+          "deleted_diagnoses",
+          "deleted_log_analyses",
+          "protected_records",
+          "completed_at"
+        ],
+        "title": "CleanupResponse"
+      },
+      "ConfirmDeletionRequest": {
+        "properties": {
+          "revision": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[a-f0-9]+$",
+            "title": "Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "ConfirmDeletionRequest"
       },
       "ConsentResponse": {
         "properties": {
@@ -2027,6 +2452,62 @@
           "observed_revision"
         ],
         "title": "CreateProcessActionRequest"
+      },
+      "DeletionImpactResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "deletable": {
+            "type": "boolean",
+            "title": "Deletable"
+          },
+          "dependent_records": {
+            "type": "integer",
+            "title": "Dependent Records"
+          },
+          "protected_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protected Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "record_id",
+          "revision",
+          "deletable",
+          "dependent_records",
+          "protected_reason"
+        ],
+        "title": "DeletionImpactResponse"
+      },
+      "DeletionResponse": {
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "DeletionResponse"
       },
       "DiagnosisFeedbackRequest": {
         "properties": {
@@ -2934,6 +3415,81 @@
         ],
         "title": "ProcessDto"
       },
+      "ProviderSettingsResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "restart_required": {
+            "type": "boolean",
+            "title": "Restart Required",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "endpoint",
+          "configured",
+          "updated_at"
+        ],
+        "title": "ProviderSettingsResponse"
+      },
+      "ProviderTestResponse": {
+        "properties": {
+          "succeeded": {
+            "type": "boolean",
+            "title": "Succeeded"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "succeeded",
+          "error_code",
+          "duration_ms"
+        ],
+        "title": "ProviderTestResponse"
+      },
       "ReportDto": {
         "properties": {
           "schema_version": {
@@ -2982,6 +3538,19 @@
           "model_explanation"
         ],
         "title": "ReportDto"
+      },
+      "RetentionPolicyResponse": {
+        "properties": {
+          "retention_days": {
+            "type": "integer",
+            "title": "Retention Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "retention_days"
+        ],
+        "title": "RetentionPolicyResponse"
       },
       "ScanFailureDto": {
         "properties": {
@@ -3402,6 +3971,65 @@
           "sensitivity"
         ],
         "title": "ToolDescriptorDto"
+      },
+      "UpdateProviderSettingsRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "pattern": "^openai_compatible$",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model"
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Endpoint"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "endpoint"
+        ],
+        "title": "UpdateProviderSettingsRequest"
+      },
+      "UpdateRetentionPolicyRequest": {
+        "properties": {
+          "retention_days": {
+            "type": "integer",
+            "maximum": 3650.0,
+            "minimum": 7.0,
+            "title": "Retention Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "retention_days"
+        ],
+        "title": "UpdateRetentionPolicyRequest"
       },
       "ValidationError": {
         "properties": {

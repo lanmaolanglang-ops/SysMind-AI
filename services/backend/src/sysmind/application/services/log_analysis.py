@@ -302,20 +302,41 @@ class LogAnalysisCoordinator:
         correlation_id: str | None,
     ) -> None:
         try:
-            await self._run(
-                analysis_id,
-                channels,
-                lookback_hours,
-                levels,
-                event_ids,
-                max_events,
-                cancellation,
-                correlation_id,
-            )
+            async with asyncio.timeout(30):
+                await self._run(
+                    analysis_id,
+                    channels,
+                    lookback_hours,
+                    levels,
+                    event_ids,
+                    max_events,
+                    cancellation,
+                    correlation_id,
+                )
         except asyncio.CancelledError:
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:
                 self._finish_cancelled(analysis_id, [], record.failures)
+        except TimeoutError:
+            cancellation.set()
+            record = self._repository.get(analysis_id)
+            if record and record.status in {"queued", "running"}:
+                self._repository.update(
+                    analysis_id,
+                    status="failed",
+                    progress=record.progress,
+                    current_step=None,
+                    finished_at=_now(),
+                    summary=record.summary or {},
+                    failures=[
+                        *record.failures,
+                        {
+                            "tool": "log_analysis",
+                            "code": "global_timeout",
+                            "message": "日志分析达到 30 秒总预算，底层操作正在有界收尾。",
+                        },
+                    ],
+                )
         except Exception as error:
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:

@@ -14,7 +14,11 @@ type UpdateState =
   | { kind: "installing"; version: string }
   | { kind: "error"; message: string };
 
-export function UpdatePanel() {
+export function UpdatePanel({
+  updaterAvailable = import.meta.env.PROD || import.meta.env.MODE === "test",
+}: {
+  updaterAvailable?: boolean;
+}) {
   const [version, setVersion] = useState("—");
   const [state, setState] = useState<UpdateState>({ kind: "idle" });
 
@@ -79,8 +83,17 @@ export function UpdatePanel() {
             安装并重启
           </button>
         ) : (
-          <button type="button" onClick={() => void checkForUpdates()} disabled={busy}>
-            {state.kind === "checking" ? "正在检查…" : "检查更新"}
+          <button
+            type="button"
+            onClick={() => void checkForUpdates()}
+            disabled={busy || !updaterAvailable}
+            title={updaterAvailable ? undefined : "开发构建未配置签名更新器"}
+          >
+            {state.kind === "checking"
+              ? "正在检查…"
+              : updaterAvailable
+                ? "检查更新"
+                : "开发构建不提供更新"}
           </button>
         )}
       </div>

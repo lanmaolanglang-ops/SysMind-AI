@@ -26,8 +26,8 @@ const STATUS_COPY: Record<string, string> = {
   created: "任务已创建",
   planning: "正在规划受限步骤",
   running_tools: "正在运行只读工具",
-  analyzing: "正在调用离线模拟 Provider",
-  waiting_user_input: "任务需要更多信息",
+  analyzing: "正在调用受控 Provider",
+  waiting_user_input: "需要补充信息后新建任务",
   completed: "Agent Runtime 自检完成",
   cancelling: "正在取消任务",
   cancelled: "任务已取消",
@@ -165,11 +165,11 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
       <div className="agent-heading">
         <div>
           <h2 id="agent-runtime-title">受限 Agent Runtime</h2>
-          <p>
-            Phase 3 使用离线 Fake Provider 验证预算、工具白名单、SSE 和审计；这里不会生成诊断报告。
-          </p>
+          <p>Provider 只能在预算内调用版本化只读工具；这里不会生成诊断报告或执行状态变更。</p>
         </div>
-        <span className="runtime-badge">Fake Provider · 离线</span>
+        <span className="runtime-badge">
+          {task?.provider === "openai_compatible" ? "真实 Provider" : "Fake Provider · 离线"}
+        </span>
       </div>
 
       <label className="agent-goal">
@@ -218,6 +218,19 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
           </button>
         )}
       </div>
+
+      {task?.status === "waiting_user_input" && (
+        <button
+          type="button"
+          onClick={() => {
+            setGoal((current) => `${current}\n补充信息：`);
+            setTask(null);
+            setEvents([]);
+          }}
+        >
+          带入上下文新建任务
+        </button>
+      )}
 
       {(events.length > 0 || (task && TERMINAL.has(task.status))) && (
         <div className="agent-results">

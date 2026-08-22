@@ -9,9 +9,9 @@ from pathlib import Path
 
 import psutil
 
+from sysmind.application.ports.actions import TargetChangedError
 from sysmind.domain.actions import MutationResult, ProcessActionCandidate
 from sysmind.tools.contracts import ToolUnavailableError
-from sysmind.windows.startup_actions import TargetChangedError
 
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _PROCESS_TERMINATE = 0x0001
@@ -75,7 +75,17 @@ class WindowsProcessActionAdapter:
         protected_pids = self._sysmind_process_tree()
         windows = self._visible_windows()
         candidates: list[ProcessActionCandidate] = []
-        for process in psutil.process_iter(("pid", "name", "create_time", "exe")):
+        processes = list(psutil.process_iter(("pid", "name", "create_time", "exe")))
+        primed: list[psutil.Process] = []
+        for process in processes:
+            try:
+                process.cpu_percent(interval=None)
+                primed.append(process)
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+        # One shared window keeps candidate discovery bounded instead of blocking per process.
+        time.sleep(0.1)
+        for process in primed:
             pid = process.pid
             try:
                 name = str(process.info.get("name") or "")

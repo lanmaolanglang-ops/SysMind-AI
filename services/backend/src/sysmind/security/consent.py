@@ -66,6 +66,10 @@ class ConsentService:
             raise ConsentError("Consent ticket target was changed.")
         if payload.get("revision") != observed_revision or payload.get("session") != self._session:
             raise ConsentError("Consent ticket context was changed.")
-        if int(payload.get("exp", 0)) < int(datetime.now(UTC).timestamp()):
+        try:
+            expires_at = int(payload.get("exp", 0))
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ConsentError("Consent ticket is invalid.") from error
+        if expires_at < int(datetime.now(UTC).timestamp()):
             raise ConsentError("Consent ticket expired.")
         return hashlib.sha256(ticket.encode()).hexdigest()

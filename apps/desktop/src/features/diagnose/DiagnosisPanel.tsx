@@ -47,22 +47,34 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     if (!activeId) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
+    let disposed = false;
+    let timer: number | undefined;
+    let delay = 800;
+    const poll = () => {
       void getDiagnosis(client, activeId, controller.signal)
         .then((result) => {
-          remember(result);
+          setDiagnosis((current) => (current?.id === activeId ? result : current));
+          setHistory((current) => [result, ...current.filter((item) => item.id !== result.id)]);
           setMessage(null);
-          if (TERMINAL.has(result.status)) window.clearInterval(timer);
+          delay = 800;
         })
         .catch(() => {
-          if (!controller.signal.aborted) setMessage("诊断进度暂时不可用，正在等待本地服务恢复。");
+          if (!controller.signal.aborted) {
+            setMessage("诊断进度暂时不可用，正在等待本地服务恢复。");
+            delay = Math.min(delay * 2, 4_000);
+          }
+        })
+        .finally(() => {
+          if (!disposed) timer = window.setTimeout(poll, delay);
         });
-    }, 350);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
     };
-  }, [activeId, client, remember]);
+    timer = window.setTimeout(poll, delay);
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeId, client]);
 
   const start = () => {
     setBusy(true);
@@ -225,7 +237,8 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
               </div>
 
               <div className="report-explanation">
-                <h4>综合说明</h4><p>{diagnosis.report.model_explanation}</p>
+                <h4>辅助解释</h4><p>{diagnosis.report.model_explanation}</p>
+                <small>确定性结论与证据引用是事实来源；此处文字仅帮助理解。</small>
               </div>
               {diagnosis.report.limitations.length > 0 && (
                 <div className="report-limitations">

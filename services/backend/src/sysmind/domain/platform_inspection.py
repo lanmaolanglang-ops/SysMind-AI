@@ -32,11 +32,15 @@ class PingResult:
 @dataclass(frozen=True, slots=True)
 class NetworkDiagnosis:
     adapter_count: int
-    has_default_route: bool
+    has_default_route: bool | None
     dns: DnsCheckResult | None
     ping: PingResult | None
     proxy: ProxyConfiguration
     failures: tuple[str, ...]
+    active_adapter_count: int = 0
+    default_gateway: str | None = None
+    gateway_reachable: bool | None = None
+    public_reachable: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

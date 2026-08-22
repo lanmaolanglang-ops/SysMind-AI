@@ -27,6 +27,8 @@ The Tauri process owns the exact child process it creates. On Windows, the child
 
 - Start, monitor, cancel, and revisit a local quick scan.
 - Collect normalized OS, CPU, GPU, memory, fixed-volume, process snapshot, and high-usage process evidence.
+- Compare the latest completed scans with a bounded ten-scan CPU, memory, and disk-usage baseline.
+- Preview and confirm deletion of terminal read-only history, with configurable retention and cleanup audit.
 - Preserve partial results when a collector is unavailable or times out.
 - Persist scan summaries and per-step audit events with collector name, version, timing, and safe error mapping.
 - Run fixture-based tests on every platform and real read-only Windows adapter/API smoke tests on Windows.
@@ -59,6 +61,10 @@ The Tauri process owns the exact child process it creates. On Windows, the child
 - Logs are structured JSON and redact common secret fields.
 - Collectors are application-owned, versioned, timeout-bounded, and read-only.
 - GPU detection uses one fixed application-authored CIM query; no user or model input reaches PowerShell.
+- The Windows GPU adapter reports metadata only and explicitly marks real-time utilization and
+  used-memory telemetry unavailable instead of estimating either value.
+- History deletion is revision-bound. Active work and diagnoses linked to controlled-action audit
+  are protected; retention never deletes actions, confirmations, action events, or recovery records.
 - Event Log collection uses the Windows Event Log API directly; callers cannot provide XPath, arbitrary channels, or commands.
 - Event summaries redact user-profile names, account identifiers, and IPv4 addresses before persistence. Raw event XML is not stored.
 - The Tool Registry is an exact allowlist; unknown tools, invalid arguments, state-changing risk levels, confirmation-requiring tools, and privilege-requiring tools are rejected.
@@ -68,6 +74,13 @@ The Tauri process owns the exact child process it creates. On Windows, the child
 - Provider report synthesis receives deterministic finding summaries, not complete tool results or the raw user question; provider failures fall back to local rules.
 
 ## Development requirements
+
+### Optional OpenAI-compatible Provider
+
+The desktop settings panel accepts an HTTPS endpoint, model, and API key. On Windows, the backend
+stores the key in Credential Manager and persists only non-sensitive settings in SQLite. Loopback
+HTTP endpoints are accepted for local development; remote plaintext HTTP endpoints are rejected.
+Leaving the Provider unconfigured keeps the application in the local-rules/Fake Provider fallback.
 
 - Windows 10/11 x64
 - Node.js 22 or later and pnpm 10 or later

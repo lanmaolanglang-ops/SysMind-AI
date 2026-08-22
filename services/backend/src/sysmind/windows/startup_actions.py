@@ -8,15 +8,12 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
+from sysmind.application.ports.actions import TargetChangedError
 from sysmind.domain.actions import MutationResult, StartupActionCandidate
 from sysmind.tools.contracts import ToolPermissionError, ToolUnavailableError
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _REPARSE_POINT = 0x400
-
-
-class TargetChangedError(RuntimeError):
-    pass
 
 
 def _digest(*parts: object) -> str:
@@ -105,10 +102,12 @@ class WindowsStartupActionAdapter:
                     self._write_metadata(directory, metadata)
                     winreg.DeleteValue(key, candidate.name)
             except PermissionError as error:
+                shutil.rmtree(directory, ignore_errors=True)
                 raise ToolPermissionError(
                     "Current-user startup entry could not be changed."
                 ) from error
             except OSError as error:
+                shutil.rmtree(directory, ignore_errors=True)
                 raise TargetChangedError("Startup target is no longer available.") from error
         else:
             folder = self._startup_folder()
@@ -122,8 +121,12 @@ class WindowsStartupActionAdapter:
             ):
                 raise TargetChangedError("Startup file changed after confirmation.")
             metadata = {"kind": "user_startup", "name": source.name}
-            self._write_metadata(directory, metadata)
-            shutil.move(str(source), str(directory / "item"))
+            try:
+                self._write_metadata(directory, metadata)
+                shutil.move(str(source), str(directory / "item"))
+            except OSError:
+                shutil.rmtree(directory, ignore_errors=True)
+                raise
         if any(item.item_id == item_id for item in self.candidates()):
             raise ToolUnavailableError("Startup action could not be verified.")
         return MutationResult(recovery_id, None)

@@ -5,6 +5,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from sysmind.security.redaction import is_sensitive_key
+
 _RESERVED_LOG_KEYS = {
     "args",
     "asctime",
@@ -30,13 +32,10 @@ _RESERVED_LOG_KEYS = {
     "threadName",
 }
 
-_SENSITIVE_KEYS = {"authorization", "api_key", "apikey", "session_token", "token"}
-
-
 def _sanitize(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            str(key): "[REDACTED]" if str(key).lower() in _SENSITIVE_KEYS else _sanitize(item)
+            str(key): "[REDACTED]" if is_sensitive_key(key) else _sanitize(item)
             for key, item in value.items()
         }
     if isinstance(value, (list, tuple)):

@@ -8,12 +8,12 @@ from sysmind.application.ports.actions import (
     ActionRepository,
     ProcessActionAdapter,
     StartupActionAdapter,
+    TargetChangedError,
 )
 from sysmind.application.ports.diagnoses import DiagnosisRepository
 from sysmind.domain.actions import ActionRecord, ProcessActionCandidate, StartupActionCandidate
 from sysmind.security import ConsentError, ConsentService
 from sysmind.tools.contracts import ToolPermissionError, ToolUnavailableError
-from sysmind.windows.startup_actions import TargetChangedError
 
 
 def _now() -> str:
@@ -287,6 +287,14 @@ class ActionCoordinator:
                     updated_at=_now(),
                     error_code="verification_failed",
                     error_message=str(error),
+                )
+            except OSError:
+                return self._repository.set_status(
+                    action.id,
+                    status="failed",
+                    updated_at=_now(),
+                    error_code="bounded_os_error",
+                    error_message="Windows could not complete the bounded action.",
                 )
 
     def get(self, action_id: str) -> ActionRecord | None:

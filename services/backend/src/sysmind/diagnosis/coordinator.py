@@ -17,6 +17,7 @@ from sysmind.diagnosis.rules import build_findings
 from sysmind.domain.diagnosis import DiagnosisRecord, DiagnosisToolCall
 from sysmind.prompts.report_explainer import LocalReportExplainer, ReportExplainer
 from sysmind.reports import compose_report, render_markdown
+from sysmind.reports.evidence import evidence_path_exists
 from sysmind.tools.executor import ToolExecutor, arguments_hash
 from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolRegistry
@@ -212,9 +213,14 @@ class DiagnosisCoordinator:
                             created_at=_now(),
                         )
                 report = compose_report(record.category, findings, tuple(limitations), explanation)
-                valid_ids = {call.id for call in calls if call.status == "completed"}
+                valid_calls = {
+                    call.id: call.result
+                    for call in calls
+                    if call.status == "completed" and call.result is not None
+                }
                 if any(
-                    ref.tool_call_id not in valid_ids
+                    ref.tool_call_id not in valid_calls
+                    or not evidence_path_exists(valid_calls[ref.tool_call_id], ref.field_path)
                     for finding in report.findings
                     for ref in finding.evidence
                 ):

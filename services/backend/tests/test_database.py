@@ -81,4 +81,4 @@ def test_current_migrations_round_trip_from_phase5(tmp_path: Path) -> None:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     engine.dispose()
 
-    assert revision == "0006_phase5a"
+    assert revision == "0008_history_retention"

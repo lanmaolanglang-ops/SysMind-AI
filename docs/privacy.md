@@ -1,10 +1,18 @@
 # SysMind AI privacy notice
 
-Last updated: 2026-08-20
+Last updated: 2026-08-22
 
 SysMind AI is local-first Windows diagnostic software. System evidence, reports, task history,
 confirmation records, and recovery material are stored on the current computer unless the user
 explicitly exports a report or enables a remote model provider.
+
+## Optional model data flow
+
+Without a configured Provider, scans and diagnosis reports remain local and use deterministic rules.
+When a Provider is configured, it receives only the bounded deterministic finding projection:
+category, code, severity, title, explanation, confidence, and evidence identifiers/field paths. The
+raw user question and complete tool results are not sent. Provider prose is labelled auxiliary and
+cannot create findings, evidence, confirmations, or action controls.
 
 ## Data stored locally
 
@@ -34,17 +42,17 @@ destination is outside SysMind AI's retention control.
 
 ## Credentials
 
-Session tokens exist only in process memory and child-process environment. Provider API keys must use
-a reviewed Windows secure-storage adapter and must never be stored in SQLite, browser storage, logs,
-exports, or source control. The current release does not claim persistent production provider-key
-storage while that adapter remains unavailable.
+Session tokens exist only in process memory and child-process environment. Provider API keys use the
+current-user Windows Credential Manager adapter and are never stored in SQLite, browser storage,
+logs, exports, or source control.
 
 ## Retention and deletion
 
-History remains on the device until the user deletes applicable records or opts to delete application
-data during interactive uninstall. Before deleting local data, export any reports that must be kept.
-Removing recovery material can make a previously disabled startup item impossible to restore through
-SysMind AI.
+Terminal scan, diagnosis, and log-analysis history is retained locally for 30 days by default. The
+user can select 7–3650 days and run cleanup immediately. Cleanup does not remove controlled-action,
+confirmation, action-event, or recovery audit records. Individual deletion first displays the number
+of dependent detail records and requires the exact preview revision. Before deleting local data,
+export any reports that must be kept.
 
 SysMind AI includes no mandatory product analytics or crash telemetry in Phase 6. A future telemetry
 feature requires a separate opt-in design and privacy update.

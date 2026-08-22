@@ -64,7 +64,10 @@ class SlowCpuProbe(FixtureSystemProbe):
 
 
 class FixtureProcessProbe:
-    def snapshot(self, limit: int = 200) -> Sequence[ProcessInfo]:
+    def snapshot(
+        self, limit: int = 200, cancel_event: Event | None = None
+    ) -> Sequence[ProcessInfo]:
+        del limit, cancel_event
         return (ProcessInfo(42, "fixture.exe", 2.0, 2_000, 1.0),)
 
     def high_usage(

@@ -54,7 +54,16 @@ def render_markdown(report: DiagnosisReport) -> str:
                 f"置信度：{finding.confidence:.0%}",
             ]
         )
-    lines.extend(["", "## 综合说明", "", report.model_explanation])
+    lines.extend(
+        [
+            "",
+            "## 辅助解释（非事实来源）",
+            "",
+            report.model_explanation,
+            "",
+            "> 确定性 findings 与其证据引用始终是本报告的事实来源。",
+        ]
+    )
     lines.extend(["", "## 限制", ""])
     lines.extend(f"- {item}" for item in report.limitations)
     return "\n".join(lines).strip() + "\n"

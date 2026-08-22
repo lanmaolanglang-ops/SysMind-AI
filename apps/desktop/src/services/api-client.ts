@@ -55,8 +55,21 @@ export class ApiClient {
     return this.#request<T>("POST", path, signal);
   }
 
-  async postJson<T, TBody>(path: string, body: TBody, signal?: AbortSignal): Promise<T> {
-    return this.#request<T>("POST", path, signal, body);
+  async putJson<T, TBody>(path: string, body: TBody, signal?: AbortSignal): Promise<T> {
+    return this.#request<T>("PUT", path, signal, body);
+  }
+
+  async delete<T>(path: string, signal?: AbortSignal): Promise<T> {
+    return this.#request<T>("DELETE", path, signal);
+  }
+
+  async postJson<T, TBody>(
+    path: string,
+    body: TBody,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<T> {
+    return this.#request<T>("POST", path, signal, body, timeoutMs);
   }
 
   async download(path: string, signal?: AbortSignal): Promise<Blob> {
@@ -129,12 +142,13 @@ export class ApiClient {
   }
 
   async #request<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     signal?: AbortSignal,
     body?: unknown,
+    timeoutMs?: number,
   ): Promise<T> {
-    const timeout = AbortSignal.timeout(this.#timeoutMs);
+    const timeout = AbortSignal.timeout(timeoutMs ?? this.#timeoutMs);
     const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const correlationId = crypto.randomUUID();
 

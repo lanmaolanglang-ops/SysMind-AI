@@ -41,6 +41,7 @@ struct HealthProbe {
 }
 
 struct BackendRuntime {
+    generation: u64,
     snapshot: BackendSnapshot,
     child: Option<Child>,
     #[cfg(windows)]
@@ -55,6 +56,7 @@ impl BackendManager {
     pub fn new() -> Self {
         Self {
             runtime: Arc::new(Mutex::new(BackendRuntime {
+                generation: 0,
                 snapshot: BackendSnapshot {
                     state: "disconnected",
                     endpoint: None,
@@ -72,17 +74,19 @@ impl BackendManager {
     }
 
     pub fn start(&self, app: &AppHandle) {
-        {
+        let generation = {
             let mut runtime = lock_runtime(&self.runtime);
             if runtime.child.is_some() || runtime.snapshot.state == "starting" {
                 return;
             }
+            runtime.generation = runtime.generation.wrapping_add(1);
             runtime.snapshot = BackendSnapshot {
                 state: "starting",
                 endpoint: None,
                 error: None,
             };
-        }
+            runtime.generation
+        };
 
         let token = Uuid::new_v4().to_string() + &Uuid::new_v4().to_string();
         let data_dir = std::env::var_os("SYSMIND_DATA_DIR")
@@ -95,7 +99,7 @@ impl BackendManager {
         let launcher = match LauncherCommand::resolve(app) {
             Ok(launcher) => launcher,
             Err(error) => {
-                self.fail(error);
+                self.fail(generation, error);
                 return;
             }
         };
@@ -114,10 +118,13 @@ impl BackendManager {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
-                self.fail(format!(
-                    "Could not start the Python sidecar using '{}': {error}",
-                    launcher.program.display()
-                ));
+                self.fail(
+                    generation,
+                    format!(
+                        "Could not start the Python sidecar using '{}': {error}",
+                        launcher.program.display()
+                    ),
+                );
                 return;
             }
         };
@@ -127,9 +134,10 @@ impl BackendManager {
             Ok(job) => Some(job),
             Err(error) => {
                 let _ = child.kill();
-                self.fail(format!(
-                    "Could not secure the sidecar process in a Windows Job: {error}"
-                ));
+                self.fail(
+                    generation,
+                    format!("Could not secure the sidecar process in a Windows Job: {error}"),
+                );
                 return;
             }
         };
@@ -138,6 +146,12 @@ impl BackendManager {
         let stderr = child.stderr.take();
         {
             let mut runtime = lock_runtime(&self.runtime);
+            if runtime.generation != generation {
+                drop(runtime);
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
             runtime.child = Some(child);
             #[cfg(windows)]
             {
@@ -146,7 +160,7 @@ impl BackendManager {
         }
 
         let monitor_shared = Arc::clone(&self.runtime);
-        thread::spawn(move || monitor_child_process(monitor_shared));
+        thread::spawn(move || monitor_child_process(monitor_shared, generation));
 
         let shared = Arc::clone(&self.runtime);
         thread::spawn(move || {
@@ -161,7 +175,11 @@ impl BackendManager {
             }
 
             let Some(stdout) = stdout else {
-                set_failure(&shared, "Backend stdout was not available.".to_string());
+                set_failure(
+                    &shared,
+                    generation,
+                    "Backend stdout was not available.".to_string(),
+                );
                 return;
             };
             let mut endpoint = None;
@@ -175,6 +193,7 @@ impl BackendManager {
             let Some(handshake) = endpoint else {
                 set_failure(
                     &shared,
+                    generation,
                     "Backend exited before publishing its local endpoint.".to_string(),
                 );
                 return;
@@ -182,6 +201,7 @@ impl BackendManager {
             if handshake.host != "127.0.0.1" {
                 set_failure(
                     &shared,
+                    generation,
                     "Backend attempted to use a non-loopback host.".to_string(),
                 );
                 return;
@@ -189,6 +209,7 @@ impl BackendManager {
             if handshake.api_version != EXPECTED_API_VERSION {
                 set_failure(
                     &shared,
+                    generation,
                     format!(
                         "API protocol mismatch: desktop expects {EXPECTED_API_VERSION}, backend reported {}.",
                         handshake.api_version
@@ -205,13 +226,16 @@ impl BackendManager {
             match wait_until_ready(&backend_endpoint, Duration::from_secs(10)) {
                 Ok(()) => {
                     let mut runtime = lock_runtime(&shared);
+                    if runtime.generation != generation {
+                        return;
+                    }
                     runtime.snapshot = BackendSnapshot {
                         state: "connected",
                         endpoint: Some(backend_endpoint),
                         error: None,
                     };
                 }
-                Err(error) => set_failure(&shared, error),
+                Err(error) => set_failure(&shared, generation, error),
             }
         });
     }
@@ -219,6 +243,7 @@ impl BackendManager {
     pub fn shutdown(&self) {
         let (endpoint, mut child) = {
             let mut runtime = lock_runtime(&self.runtime);
+            runtime.generation = runtime.generation.wrapping_add(1);
             (runtime.snapshot.endpoint.clone(), runtime.child.take())
         };
 
@@ -254,8 +279,8 @@ impl BackendManager {
         }
     }
 
-    fn fail(&self, message: String) {
-        set_failure(&self.runtime, message);
+    fn fail(&self, generation: u64, message: String) {
+        set_failure(&self.runtime, generation, message);
     }
 }
 
@@ -265,9 +290,12 @@ fn lock_runtime(runtime: &Arc<Mutex<BackendRuntime>>) -> MutexGuard<'_, BackendR
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn set_failure(runtime: &Arc<Mutex<BackendRuntime>>, message: String) {
+fn set_failure(runtime: &Arc<Mutex<BackendRuntime>>, generation: u64, message: String) {
     eprintln!("SysMind backend lifecycle error: {message}");
     let mut managed = lock_runtime(runtime);
+    if managed.generation != generation {
+        return;
+    }
     if let Some(mut child) = managed.child.take() {
         let _ = child.kill();
         let _ = child.wait();
@@ -283,10 +311,13 @@ fn set_failure(runtime: &Arc<Mutex<BackendRuntime>>, message: String) {
     };
 }
 
-fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>) {
+fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>, generation: u64) {
     loop {
         thread::sleep(Duration::from_millis(250));
         let mut managed = lock_runtime(&runtime);
+        if managed.generation != generation {
+            return;
+        }
         let Some(child) = managed.child.as_mut() else {
             return;
         };
@@ -532,5 +563,26 @@ mod tests {
         let path = bundled_backend_path(PathBuf::from("C:/Program Files/SysMind/resources"));
 
         assert!(path.ends_with(PathBuf::from("backend/sysmind-backend.exe")));
+    }
+
+    #[test]
+    fn stale_generation_cannot_publish_failure() {
+        let runtime = Arc::new(Mutex::new(BackendRuntime {
+            generation: 2,
+            snapshot: BackendSnapshot {
+                state: "starting",
+                endpoint: None,
+                error: None,
+            },
+            child: None,
+            #[cfg(windows)]
+            job: None,
+        }));
+
+        set_failure(&runtime, 1, "stale startup failed".to_string());
+
+        let snapshot = lock_runtime(&runtime).snapshot.clone();
+        assert_eq!(snapshot.state, "starting");
+        assert!(snapshot.error.is_none());
     }
 }
