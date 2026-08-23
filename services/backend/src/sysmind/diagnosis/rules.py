@@ -161,6 +161,13 @@ def build_findings(
             )
         elif call.tool_name == "network.diagnose" and isinstance(result, dict):
             ping = result.get("ping")
+            failures = {
+                str(item)
+                for item in cast(
+                    list[object] | tuple[object, ...], result.get("failures", ())
+                )
+            }
+            public_reachable = result.get("public_reachable")
             active_adapter_count = result.get("active_adapter_count")
             if active_adapter_count is None:
                 active_adapter_count = (
@@ -192,17 +199,38 @@ def build_findings(
                         "$.has_default_route",
                     )
                 )
-            elif result.get("gateway_reachable") is False:
+            elif result.get("gateway_reachable") is False and public_reachable is not True:
                 findings.append(
                     _finding(
                         "gateway_unreachable",
-                        "high",
-                        "默认网关未响应",
-                        "已发现默认路由，但受限 ICMP 检查未收到成功状态回复。",
+                        "medium",
+                        "默认网关 ICMP 未响应",
+                        (
+                            "已发现默认路由，但受限 ICMP 检查未收到成功状态回复；"
+                            "该结果不是网关故障的充分证据。"
+                        ),
                         "检查本机链路、无线连接或路由器状态；网关也可能禁用 ICMP。",
-                        0.76,
+                        0.65,
                         call,
                         "$.gateway_reachable",
+                    )
+                )
+            elif result.get("gateway_reachable") is False and public_reachable is True:
+                findings.append(
+                    Finding(
+                        id=str(uuid.uuid4()),
+                        code="gateway_icmp_no_response",
+                        severity="info",
+                        title="默认网关未响应 ICMP，但公网目标可达",
+                        explanation=(
+                            "公网固定目标已响应，因此网关 ICMP 无响应不能证明本地链路故障。"
+                        ),
+                        recommendation="无需仅因该结果重置网络；网关可能禁用 ICMP。",
+                        confidence=0.96,
+                        evidence=(
+                            EvidenceReference(call.id, "$.gateway_reachable"),
+                            EvidenceReference(call.id, "$.public_reachable"),
+                        ),
                     )
                 )
             if result.get("dns") is None:
@@ -215,10 +243,10 @@ def build_findings(
                         "检查 DNS 服务器配置后重试。",
                         0.82,
                         call,
-                        "$.dns",
+                        "$.failures" if "dns_unavailable" in failures else "$.dns",
                     )
                 )
-                if result.get("gateway_reachable") is True:
+                if result.get("gateway_reachable") is True or public_reachable is True:
                     findings.append(
                         Finding(
                             id=str(uuid.uuid4()),
@@ -226,7 +254,7 @@ def build_findings(
                             severity="high",
                             title="本地链路可达但 DNS 解析失败",
                             explanation=(
-                                "默认网关检查成功，而固定域名解析未完成，故障更接近 DNS 层。"
+                                "网络 IP 连通性检查成功，而固定域名解析未完成，故障更接近 DNS 层。"
                             ),
                             recommendation=(
                                 "核对网卡 DNS 服务器配置，并尝试受信任的备用 DNS 后复测。"
@@ -238,6 +266,34 @@ def build_findings(
                             ),
                         )
                     )
+            capability_messages = {
+                "default_route_unavailable": (
+                    "默认路由读取能力受限",
+                    "系统未能读取默认路由配置，不能据此判断设备确实没有默认路由。",
+                ),
+                "gateway_icmp_unavailable": (
+                    "网关 ICMP 探测不可用",
+                    "当前环境无法执行网关 ICMP 探测，网关可达性证据不完整。",
+                ),
+                "icmp_unavailable": (
+                    "公网 ICMP 探测不可用",
+                    "当前环境无法执行固定公网目标 ICMP 探测，外网可达性证据不完整。",
+                ),
+            }
+            for failure in sorted(failures & capability_messages.keys()):
+                title, explanation = capability_messages[failure]
+                findings.append(
+                    _finding(
+                        f"network_capability_{failure}",
+                        "info",
+                        title,
+                        explanation,
+                        "结合其他成功探针判断；如需确认，请在网络稳定时重新诊断。",
+                        0.99,
+                        call,
+                        "$.failures",
+                    )
+                )
             if isinstance(ping, dict) and float(ping.get("loss_percent", 0)) >= 50:
                 findings.append(
                     _finding(

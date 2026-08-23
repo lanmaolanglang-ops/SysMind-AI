@@ -28,7 +28,7 @@ _GPU_COMMAND = (
 )
 
 
-def _normalized_cpu_percent(raw_percent: float, logical_cores: int | None = None) -> float:
+def normalized_cpu_percent(raw_percent: float, logical_cores: int | None = None) -> float:
     cores = logical_cores or psutil.cpu_count(logical=True) or 1
     return round(min(max(raw_percent / cores, 0.0), 100.0), 1)
 
@@ -169,7 +169,7 @@ class WindowsProcessProbe:
             return ProcessInfo(
                 pid=process.pid,
                 name=process.name(),
-                cpu_percent=_normalized_cpu_percent(process.cpu_percent(interval=None)),
+                cpu_percent=normalized_cpu_percent(process.cpu_percent(interval=None)),
                 memory_bytes=memory.rss,
                 memory_percent=round(process.memory_percent(), 2),
             )

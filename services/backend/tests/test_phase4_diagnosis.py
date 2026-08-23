@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import time
+from dataclasses import asdict
 from threading import Event
 
 import pytest
@@ -14,6 +17,8 @@ from sysmind.api.app import create_app
 from sysmind.core.config import Settings
 from sysmind.diagnosis import DiagnosisCoordinator
 from sysmind.diagnosis.planning import classify_question, plan_for
+from sysmind.diagnosis.rules import build_findings
+from sysmind.domain.diagnosis import DiagnosisToolCall
 from sysmind.infrastructure.database import create_database_engine, create_session_factory
 from sysmind.infrastructure.database.repositories import SqlAlchemyDiagnosisRepository
 from sysmind.prompts import LocalReportExplainer, ProviderReportExplainer
@@ -44,6 +49,7 @@ RESULTS: dict[str, object] = {
         "has_default_route": True,
         "dns": None,
         "ping": {"loss_percent": 100.0},
+        "failures": ["dns_unavailable"],
     },
     "log.crash.analyze": [
         {"application": "sample.exe", "faulting_module": "sample.dll", "count": 4}
@@ -229,7 +235,15 @@ def test_provider_synthesis_is_audited(settings: Settings, auth_headers: dict[st
     engine.dispose()
     assert row.provider == "fake"
     assert row.status == "completed"
-    assert len(row.request_hash) == 64
+    expected_hash = hashlib.sha256(
+        json.dumps(
+            asdict(provider.requests[0]),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    assert row.request_hash == expected_hash
     assert len(row.response_hash) == 64
 
 
@@ -252,6 +266,91 @@ def test_provider_failure_degrades_to_local_report(
     assert result["report"] is not None
     assert any("模型解释不可用" in item for item in result["report"]["limitations"])
     assert "do not expose" not in str(result)
+    engine = create_database_engine(settings.database_url)
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT request_hash FROM diagnosis_model_calls WHERE diagnosis_id = :id"
+            ),
+            {"id": created["id"]},
+        ).one()
+    engine.dispose()
+    expected_hash = hashlib.sha256(
+        json.dumps(
+            asdict(provider.requests[0]),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    assert row.request_hash == expected_hash
+
+
+def _network_findings(result: dict[str, object]) -> dict[str, object]:
+    call = DiagnosisToolCall(
+        id="network-call",
+        diagnosis_id="diagnosis",
+        tool_name="network.diagnose",
+        tool_version="1.0",
+        status="completed",
+        result=result,
+        summary={},
+        error_code=None,
+    )
+    return {finding.code: finding for finding in build_findings("network", (call,))}
+
+
+def test_network_probe_failure_is_visible_without_claiming_no_route() -> None:
+    findings = _network_findings(
+        {
+            "adapter_count": 1,
+            "active_adapter_count": 1,
+            "has_default_route": None,
+            "failures": ["default_route_unavailable", "gateway_icmp_unavailable"],
+            "dns": {"addresses": ["1.1.1.1"]},
+            "ping": None,
+            "public_reachable": None,
+        }
+    )
+
+    assert "no_default_route" not in findings
+    assert "network_capability_default_route_unavailable" in findings
+    assert "network_capability_gateway_icmp_unavailable" in findings
+
+
+def test_empty_gateway_result_is_reported_as_no_route_not_probe_failure() -> None:
+    findings = _network_findings(
+        {
+            "adapter_count": 1,
+            "active_adapter_count": 1,
+            "has_default_route": False,
+            "failures": [],
+            "dns": {"addresses": ["1.1.1.1"]},
+            "ping": None,
+        }
+    )
+
+    assert "no_default_route" in findings
+    assert not any(code.startswith("network_capability_") for code in findings)
+
+
+def test_public_connectivity_makes_gateway_icmp_conclusion_conservative() -> None:
+    findings = _network_findings(
+        {
+            "adapter_count": 1,
+            "active_adapter_count": 1,
+            "has_default_route": True,
+            "gateway_reachable": False,
+            "public_reachable": True,
+            "failures": [],
+            "dns": None,
+            "ping": {"loss_percent": 0.0},
+        }
+    )
+
+    assert "gateway_unreachable" not in findings
+    assert "gateway_icmp_no_response" in findings
+    assert "dns_failure_after_gateway_success" in findings
 
 
 def test_ambiguous_question_declares_limitation(

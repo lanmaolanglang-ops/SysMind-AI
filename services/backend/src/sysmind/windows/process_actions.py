@@ -6,12 +6,14 @@ import os
 import time
 from ctypes import wintypes
 from pathlib import Path
+from typing import cast
 
 import psutil
 
 from sysmind.application.ports.actions import TargetChangedError
 from sysmind.domain.actions import MutationResult, ProcessActionCandidate
 from sysmind.tools.contracts import ToolUnavailableError
+from sysmind.windows.diagnostics import normalized_cpu_percent
 
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _PROCESS_TERMINATE = 0x0001
@@ -46,6 +48,8 @@ _PROTECTED_NAMES = {
     "securityhealthservice.exe",
 }
 _PROTECTED_NAME_FRAGMENTS = ("antivirus", "defender", "endpoint", "security", "edr")
+_MAX_VISIBLE_PROCESS_CANDIDATES = 200
+_CANDIDATE_ENUMERATION_BUDGET_SECONDS = 2.0
 
 
 class _SidAndAttributes(ctypes.Structure):
@@ -75,20 +79,26 @@ class WindowsProcessActionAdapter:
         protected_pids = self._sysmind_process_tree()
         windows = self._visible_windows()
         candidates: list[ProcessActionCandidate] = []
-        processes = list(psutil.process_iter(("pid", "name", "create_time", "exe")))
-        primed: list[psutil.Process] = []
-        for process in processes:
+        deadline = time.monotonic() + _CANDIDATE_ENUMERATION_BUDGET_SECONDS
+        primed: list[tuple[psutil.Process, dict[str, object]]] = []
+        for pid in sorted(windows)[:_MAX_VISIBLE_PROCESS_CANDIDATES]:
+            if time.monotonic() >= deadline:
+                break
             try:
+                process = psutil.Process(pid)
+                info = process.as_dict(attrs=("pid", "name", "create_time", "exe"))
                 process.cpu_percent(interval=None)
-                primed.append(process)
+                primed.append((process, info))
             except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
         # One shared window keeps candidate discovery bounded instead of blocking per process.
         time.sleep(0.1)
-        for process in primed:
+        for process, info in primed:
+            if time.monotonic() >= deadline:
+                break
             pid = process.pid
             try:
-                name = str(process.info.get("name") or "")
+                name = str(info.get("name") or "")
                 handles = windows.get(pid, ())
                 if (
                     not handles
@@ -105,10 +115,10 @@ class WindowsProcessActionAdapter:
                     )
                 ):
                     continue
-                created = float(process.info["create_time"])
-                image = str(process.info.get("exe") or "").casefold()
+                created = float(cast(float, info["create_time"]))
+                image = str(info.get("exe") or "").casefold()
                 memory = round(process.memory_percent(), 2)
-                cpu = round(process.cpu_percent(interval=None), 1)
+                cpu = normalized_cpu_percent(process.cpu_percent(interval=None))
                 item_id = _digest("current_user_process", pid, created)
                 revision = _digest(pid, created, current_sid, current_session, image, *handles)
                 candidates.append(

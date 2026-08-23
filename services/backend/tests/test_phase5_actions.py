@@ -377,6 +377,55 @@ def test_process_post_state_access_denied_is_not_reported_as_closed(
         WindowsProcessActionAdapter()._same_process(candidate)
 
 
+def test_process_candidates_only_sample_visible_pids_and_normalize_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeProcess:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+            self._cpu_calls = 0
+
+        def as_dict(self, attrs: object) -> dict[str, object]:
+            del attrs
+            return {
+                "pid": self.pid,
+                "name": "Editor.exe",
+                "create_time": 100.0,
+                "exe": r"C:\Program Files\Editor\Editor.exe",
+            }
+
+        def cpu_percent(self, interval: object = None) -> float:
+            del interval
+            self._cpu_calls += 1
+            return 0.0 if self._cpu_calls == 1 else 320.0
+
+        def memory_percent(self) -> float:
+            return 5.0
+
+    adapter = WindowsProcessActionAdapter()
+    constructed: list[int] = []
+
+    def process(pid: int) -> FakeProcess:
+        constructed.append(pid)
+        return FakeProcess(pid)
+
+    monkeypatch.setattr("sysmind.windows.process_actions.os.name", "nt")
+    monkeypatch.setattr(adapter, "_visible_windows", lambda: {42: (1001,)})
+    monkeypatch.setattr(adapter, "_process_sid", lambda _pid: "S-1-fixture")
+    monkeypatch.setattr(adapter, "_session_id", lambda _pid: 1)
+    monkeypatch.setattr(adapter, "_elevation_type", lambda _pid: 1)
+    monkeypatch.setattr(adapter, "_sysmind_process_tree", lambda: set())
+    monkeypatch.setattr(adapter, "_is_critical", lambda _pid: False)
+    monkeypatch.setattr("sysmind.windows.process_actions.psutil.Process", process)
+    monkeypatch.setattr("sysmind.windows.diagnostics.psutil.cpu_count", lambda logical=True: 8)
+    monkeypatch.setattr("sysmind.windows.process_actions.time.sleep", lambda _seconds: None)
+
+    candidates = adapter.candidates()
+
+    assert constructed == [42]
+    assert candidates[0].cpu_percent == 40.0
+
+
 def test_process_action_api_preserves_pending_and_double_confirmation_contract(
     tmp_path: Path,
     client: TestClient,

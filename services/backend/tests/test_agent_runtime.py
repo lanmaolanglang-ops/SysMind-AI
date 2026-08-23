@@ -27,7 +27,11 @@ from sysmind.domain.agent_tasks import AgentBudget
 from sysmind.infrastructure.database import create_database_engine, create_session_factory
 from sysmind.infrastructure.database.repositories import SqlAlchemyAgentTaskRepository
 from sysmind.tasks import AgentTaskManager
+from sysmind.tools.contracts import ToolCancelledError
+from sysmind.tools.executor import ToolExecutor
+from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolDefinition, ToolRegistry
+from sysmind.tools.runtime_tools import build_runtime_registry
 
 
 class EchoInput(BaseModel):
@@ -400,3 +404,28 @@ async def test_task_manager_enforces_global_concurrency(settings: Settings) -> N
         raise AssertionError("concurrent tasks did not complete")
 
     assert provider.max_active == 1
+
+
+@pytest.mark.anyio
+async def test_runtime_process_snapshot_propagates_cancellation() -> None:
+    class CancelAwareProcessProbe:
+        def snapshot(self, limit: int = 200, cancel_event: Event | None = None) -> object:
+            assert limit == 25
+            assert cancel_event is cancellation
+            if cancel_event is not None and cancel_event.is_set():
+                raise ToolCancelledError("cancelled")
+            raise AssertionError("expected a pre-cancelled event")
+
+    registry = build_runtime_registry(object(), CancelAwareProcessProbe(), object())  # type: ignore[arg-type]
+    cancellation = Event()
+    cancellation.set()
+    result = await ToolExecutor(ToolPolicy(registry)).execute(
+        name="process.snapshot",
+        version="1.0",
+        arguments={"limit": 25},
+        allowed_tools=("process.snapshot@1.0",),
+        cancel_event=cancellation,
+    )
+
+    assert result.status == "cancelled"
+    assert result.error_code == "cancelled"

@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict
 from datetime import UTC, datetime
 from threading import Event
 from typing import cast
@@ -172,13 +170,9 @@ class DiagnosisCoordinator:
                     record.id, status="running", progress=85, current_step="组合证据与解释"
                 )
                 explanation_started = time.monotonic()
-                explanation_request_hash = hashlib.sha256(
-                    json.dumps(
-                        [asdict(finding) for finding in findings],
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ).encode()
-                ).hexdigest()
+                explanation_request_hash = explainer.request_hash(
+                    record.category, record.user_question, findings
+                )
                 try:
                     explanation = await asyncio.wait_for(
                         explainer.explain(record.category, record.user_question, findings),
@@ -190,7 +184,7 @@ class DiagnosisCoordinator:
                             record.id,
                             provider=explainer.name,
                             status="failed",
-                            request_hash=explanation_request_hash,
+                            request_hash=cast(str, explanation_request_hash),
                             response_hash=None,
                             duration_ms=round((time.monotonic() - explanation_started) * 1000),
                             error_code="provider_error",
@@ -206,7 +200,7 @@ class DiagnosisCoordinator:
                             record.id,
                             provider=explainer.name,
                             status="completed",
-                            request_hash=explanation_request_hash,
+                            request_hash=cast(str, explanation_request_hash),
                             response_hash=hashlib.sha256(explanation.encode()).hexdigest(),
                             duration_ms=round((time.monotonic() - explanation_started) * 1000),
                             error_code=None,

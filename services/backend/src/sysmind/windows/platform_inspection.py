@@ -262,7 +262,7 @@ class WindowsNetworkProbe:
         if gateway is not None:
             try:
                 gateway_reachable = (
-                    self._ping_ipv4(gateway, 1, 750, cancel_event).received > 0
+                    self._ping_ipv4(gateway, 2, 750, cancel_event).received > 0
                 )
             except ToolUnavailableError:
                 failures.append("gateway_icmp_unavailable")

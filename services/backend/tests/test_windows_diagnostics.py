@@ -15,13 +15,13 @@ from sysmind.core.config import Settings
 from sysmind.windows.diagnostics import (
     WindowsProcessProbe,
     WindowsSystemProbe,
-    _normalized_cpu_percent,
+    normalized_cpu_percent,
 )
 
 
 def test_process_cpu_is_normalized_to_whole_machine_percentage() -> None:
-    assert _normalized_cpu_percent(1600.0, logical_cores=32) == 50.0
-    assert _normalized_cpu_percent(6400.0, logical_cores=32) == 100.0
+    assert normalized_cpu_percent(1600.0, logical_cores=32) == 50.0
+    assert normalized_cpu_percent(6400.0, logical_cores=32) == 100.0
 
 
 def test_gpu_parser_uses_fixed_application_command(monkeypatch: pytest.MonkeyPatch) -> None:
