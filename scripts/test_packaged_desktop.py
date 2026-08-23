@@ -4,10 +4,12 @@ import argparse
 import ctypes
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import closing
 from ctypes import wintypes
 from pathlib import Path
 
@@ -52,6 +54,23 @@ def wait_for_backend_ready(process: psutil.Process, timeout: float = 20) -> None
             return
         time.sleep(0.1)
     raise RuntimeError("Packaged backend did not become ready on a loopback endpoint.")
+
+
+def wait_for_database_head(database_path: Path, timeout: float = 20) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if database_path.is_file():
+            try:
+                with closing(sqlite3.connect(database_path)) as database:
+                    revision = database.execute(
+                        "SELECT version_num FROM alembic_version"
+                    ).fetchone()
+                if revision == ("0010_phase32",):
+                    return True
+            except sqlite3.Error:
+                pass
+        time.sleep(0.1)
+    return False
 
 
 def close_visible_windows(process_id: int) -> None:
@@ -115,6 +134,10 @@ def main() -> None:
         backend = wait_for_backend(desktop.pid)
         wait_for_backend_ready(backend)
         try:
+            database_path = data_directory / "sysmind.db"
+            results["data_directory_created"] = data_directory.is_dir()
+            results["database_migrated_to_head"] = wait_for_database_head(database_path)
+            results["database_created"] = database_path.is_file()
             command_line = backend.cmdline()
             results["bundled_backend_started"] = True
             results["session_token_not_in_arguments"] = "--session-token" not in command_line

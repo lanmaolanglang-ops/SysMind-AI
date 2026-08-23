@@ -37,7 +37,7 @@ backend virtual environment are available inside the sandbox.
 From the isolated guest only:
 
 ```powershell
-Set-Location 'D:\SysMind AI'
+Set-Location '<repository-root>'
 .\scripts\run-phase5a-isolated-tests.ps1 -ConfirmIsolatedEnvironment
 ```
 

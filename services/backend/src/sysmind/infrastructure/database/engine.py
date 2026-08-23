@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 
 def create_database_engine(database_url: str) -> Engine:
-    engine = create_engine(database_url, future=True)
+    engine = create_engine(database_url, future=True, poolclass=NullPool)
 
     @event.listens_for(engine, "connect")
     def configure_sqlite(dbapi_connection: object, _connection_record: object) -> None:
