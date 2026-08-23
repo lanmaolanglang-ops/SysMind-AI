@@ -225,6 +225,13 @@ class Diagnosis(Base):
     category: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     plan_json: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_confidence: Mapped[float | None] = mapped_column()
+    planner_status: Mapped[str | None] = mapped_column(String(30))
+    clarification_question: Mapped[str | None] = mapped_column(Text)
+    agent_round_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_agent_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    max_tool_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    stop_reason: Mapped[str | None] = mapped_column(String(40))
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     current_step: Mapped[str | None] = mapped_column(String(100))
     report_json: Mapped[str | None] = mapped_column(Text)
@@ -284,6 +291,93 @@ class DiagnosisModelCall(Base):
     response_hash: Mapped[str | None] = mapped_column(String(64))
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentPlanModel(Base):
+    __tablename__ = "agent_plans"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    diagnosis_id: Mapped[str] = mapped_column(
+        ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    problem_category: Mapped[str] = mapped_column(String(30), nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    plan_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DiagnosisStepModel(Base):
+    __tablename__ = "diagnosis_steps"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_plans.id", ondelete="CASCADE"), nullable=False
+    )
+    diagnosis_id: Mapped[str] = mapped_column(
+        ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    tool_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    tool_call_id: Mapped[str | None] = mapped_column(ForeignKey("diagnosis_tool_calls.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentDecisionModel(Base):
+    __tablename__ = "agent_decisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    diagnosis_id: Mapped[str] = mapped_column(
+        ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    plan_id: Mapped[str | None] = mapped_column(ForeignKey("agent_plans.id", ondelete="SET NULL"))
+    decision_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    data_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TaskUserInputModel(Base):
+    __tablename__ = "task_user_inputs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    diagnosis_id: Mapped[str] = mapped_column(
+        ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DiagnosisHypothesisModel(Base):
+    __tablename__ = "diagnosis_hypotheses"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    diagnosis_id: Mapped[str] = mapped_column(
+        ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    hypothesis_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    supporting_evidence_json: Mapped[str] = mapped_column(Text, nullable=False)
+    contradicting_evidence_json: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentStopReasonModel(Base):
+    __tablename__ = "agent_stop_reasons"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    diagnosis_id: Mapped[str] = mapped_column(
+        ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    reason: Mapped[str] = mapped_column(String(40), nullable=False)
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
+    terminal_status: Mapped[str] = mapped_column(String(30), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

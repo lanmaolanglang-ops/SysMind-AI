@@ -4,9 +4,11 @@ from typing import Protocol
 
 from sysmind.domain.diagnosis import (
     DiagnosisCategory,
+    DiagnosisHypothesis,
     DiagnosisRecord,
     DiagnosisReport,
     DiagnosisToolCall,
+    StopReason,
 )
 
 
@@ -25,6 +27,49 @@ class DiagnosisRepository(Protocol):
     def recent(self, limit: int = 20) -> list[DiagnosisRecord]: ...
     def update_progress(
         self, diagnosis_id: str, *, status: str, progress: int, current_step: str | None
+    ) -> None: ...
+    def save_agent_plan(
+        self,
+        diagnosis_id: str,
+        *,
+        provider: str,
+        plan: dict[str, object],
+        revision: int,
+        created_at: str,
+    ) -> tuple[str, tuple[str, ...]]: ...
+    def finish_diagnosis_step(
+        self, step_id: str, *, status: str, tool_call_id: str | None
+    ) -> None: ...
+    def add_agent_decision(
+        self,
+        diagnosis_id: str,
+        *,
+        plan_id: str | None,
+        decision_type: str,
+        reason: str,
+        data: dict[str, object],
+        created_at: str,
+    ) -> None: ...
+    def wait_for_input(self, diagnosis_id: str, *, question: str) -> DiagnosisRecord: ...
+    def resume_with_input(
+        self, diagnosis_id: str, *, input_text: str, created_at: str
+    ) -> DiagnosisRecord | None: ...
+    def user_inputs(self, diagnosis_id: str) -> tuple[str, ...]: ...
+    def replace_hypotheses(
+        self,
+        diagnosis_id: str,
+        *,
+        hypotheses: tuple[DiagnosisHypothesis, ...],
+        updated_at: str,
+    ) -> None: ...
+    def record_stop_reason(
+        self,
+        diagnosis_id: str,
+        *,
+        reason: StopReason,
+        detail: str,
+        terminal_status: str,
+        created_at: str,
     ) -> None: ...
     def complete(
         self,

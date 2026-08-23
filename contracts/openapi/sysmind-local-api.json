@@ -652,6 +652,58 @@
         }
       }
     },
+    "/api/v1/diagnoses/{diagnosis_id}/inputs": {
+      "post": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Continue Diagnosis",
+        "operationId": "continue_diagnosis_api_v1_diagnoses__diagnosis_id__inputs_post",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Diagnosis Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinueDiagnosisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/diagnoses/{diagnosis_id}": {
       "get": {
         "tags": [
@@ -2291,6 +2343,21 @@
         ],
         "title": "ConsentResponse"
       },
+      "ContinueDiagnosisRequest": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Answer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer"
+        ],
+        "title": "ContinueDiagnosisRequest"
+      },
       "CpuDto": {
         "properties": {
           "model": {
@@ -2580,6 +2647,49 @@
             "type": "array",
             "title": "Plan"
           },
+          "diagnosis_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StructuredDiagnosisPlanDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent_round_count": {
+            "type": "integer",
+            "title": "Agent Round Count",
+            "default": 0
+          },
+          "max_agent_rounds": {
+            "type": "integer",
+            "title": "Max Agent Rounds",
+            "default": 4
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "title": "Max Tool Calls",
+            "default": 8
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
+          "user_inputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "User Inputs"
+          },
           "progress": {
             "type": "integer",
             "title": "Progress"
@@ -2854,6 +2964,53 @@
         ],
         "title": "EventGroupDto"
       },
+      "EvidenceDetailDto": {
+        "properties": {
+          "tool_call_id": {
+            "type": "string",
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "tool_version": {
+            "type": "string",
+            "title": "Tool Version"
+          },
+          "key_fields": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Key Fields"
+          },
+          "raw_result_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw Result Summary"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_call_id",
+          "tool_name",
+          "tool_version",
+          "key_fields",
+          "raw_result_summary"
+        ],
+        "title": "EvidenceDetailDto"
+      },
       "EvidenceDto": {
         "properties": {
           "tool_call_id": {
@@ -2934,6 +3091,13 @@
             },
             "type": "array",
             "title": "Evidence"
+          },
+          "evidence_details": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDetailDto"
+            },
+            "type": "array",
+            "title": "Evidence Details"
           }
         },
         "type": "object",
@@ -3028,6 +3192,74 @@
           "ready"
         ],
         "title": "HealthResponse"
+      },
+      "HypothesisDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "hypothesis": {
+            "type": "string",
+            "title": "Hypothesis"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "supporting_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDto"
+            },
+            "type": "array",
+            "title": "Supporting Evidence"
+          },
+          "contradicting_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDto"
+            },
+            "type": "array",
+            "title": "Contradicting Evidence"
+          },
+          "supporting_evidence_details": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDetailDto"
+            },
+            "type": "array",
+            "title": "Supporting Evidence Details"
+          },
+          "contradicting_evidence_details": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDetailDto"
+            },
+            "type": "array",
+            "title": "Contradicting Evidence Details"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "key",
+          "hypothesis",
+          "rationale",
+          "supporting_evidence",
+          "contradicting_evidence",
+          "confidence",
+          "status"
+        ],
+        "title": "HypothesisDto"
       },
       "LogAnalysisFailureDto": {
         "properties": {
@@ -3525,6 +3757,13 @@
           "model_explanation": {
             "type": "string",
             "title": "Model Explanation"
+          },
+          "hypotheses": {
+            "items": {
+              "$ref": "#/components/schemas/HypothesisDto"
+            },
+            "type": "array",
+            "title": "Hypotheses"
           }
         },
         "type": "object",
@@ -3856,6 +4095,50 @@
         "type": "object",
         "title": "StartLogAnalysisRequest"
       },
+      "StructuredDiagnosisPlanDto": {
+        "properties": {
+          "problem_category": {
+            "type": "string",
+            "title": "Problem Category"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "clarification_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification Question"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problem_category",
+          "confidence",
+          "status",
+          "clarification_question",
+          "steps"
+        ],
+        "title": "StructuredDiagnosisPlanDto"
+      },
       "ToolCallDto": {
         "properties": {
           "id": {
@@ -3896,6 +4179,30 @@
               }
             ],
             "title": "Error Code"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
           }
         },
         "type": "object",

@@ -1,8 +1,10 @@
 from pathlib import Path
 
+from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 
 from alembic import command
+from sysmind.api.app import create_app
 from sysmind.core.config import Settings
 from sysmind.infrastructure.database import create_database_engine, run_migrations
 from sysmind.infrastructure.database.migrations import alembic_config
@@ -21,7 +23,25 @@ CURRENT_TABLES = {
     "diagnosis_tool_calls",
     "diagnosis_feedback",
     "diagnosis_model_calls",
+    "agent_plans",
+    "diagnosis_steps",
+    "agent_decisions",
+    "task_user_inputs",
+    "diagnosis_hypotheses",
+    "agent_stop_reasons",
 }
+
+
+def test_app_shutdown_releases_the_sqlite_file(settings: Settings) -> None:
+    database_path = settings.data_dir / "sysmind.db"
+
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/health").status_code == 401
+        assert database_path.is_file()
+
+    moved_path = settings.data_dir / "sysmind-after-shutdown.db"
+    database_path.rename(moved_path)
+    moved_path.rename(database_path)
 
 
 def test_database_initialization_enables_safety_pragmas(settings: Settings) -> None:
@@ -81,4 +101,4 @@ def test_current_migrations_round_trip_from_phase5(tmp_path: Path) -> None:
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
     engine.dispose()
 
-    assert revision == "0008_history_retention"
+    assert revision == "0010_phase32"

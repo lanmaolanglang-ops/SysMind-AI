@@ -1,30 +1,41 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import asdict
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.application.ports.diagnoses import DiagnosisRepository
 from sysmind.domain.diagnosis import (
     DiagnosisCategory,
+    DiagnosisHypothesis,
     DiagnosisRecord,
     DiagnosisReport,
     DiagnosisStatus,
     DiagnosisToolCall,
     EvidenceReference,
     Finding,
+    HypothesisStatus,
     Severity,
+    StopReason,
 )
 from sysmind.infrastructure.database.models import (
+    AgentDecisionModel,
+    AgentPlanModel,
+    AgentStopReasonModel,
     Diagnosis,
     DiagnosisFeedback,
+    DiagnosisHypothesisModel,
     DiagnosisModelCall,
+    DiagnosisStepModel,
     DiagnosisToolCallModel,
+    TaskUserInputModel,
 )
+from sysmind.tools.executor import arguments_hash
 
 
 def _report(data: dict[str, object] | None) -> DiagnosisReport | None:
@@ -46,6 +57,25 @@ def _report(data: dict[str, object] | None) -> DiagnosisReport | None:
         )
         for item in cast(list[dict[str, object]], data["findings"])
     )
+    hypotheses = tuple(
+        DiagnosisHypothesis(
+            id=cast(str, item["id"]),
+            key=cast(str, item["key"]),
+            hypothesis=cast(str, item["hypothesis"]),
+            rationale=cast(str, item["rationale"]),
+            supporting_evidence=tuple(
+                EvidenceReference(cast(str, ref["tool_call_id"]), cast(str, ref["field_path"]))
+                for ref in cast(list[dict[str, object]], item["supporting_evidence"])
+            ),
+            contradicting_evidence=tuple(
+                EvidenceReference(cast(str, ref["tool_call_id"]), cast(str, ref["field_path"]))
+                for ref in cast(list[dict[str, object]], item["contradicting_evidence"])
+            ),
+            confidence=float(cast(float, item["confidence"])),
+            status=cast(HypothesisStatus, item["status"]),
+        )
+        for item in cast(list[dict[str, object]], data.get("hypotheses", []))
+    )
     return DiagnosisReport(
         cast(str, data["schema_version"]),
         cast(str, data["summary"]),
@@ -54,6 +84,7 @@ def _report(data: dict[str, object] | None) -> DiagnosisReport | None:
         float(cast(float, data["confidence"])),
         tuple(cast(list[str], data["limitations"])),
         cast(str, data["model_explanation"]),
+        hypotheses,
     )
 
 
@@ -77,6 +108,13 @@ def _record(model: Diagnosis) -> DiagnosisRecord:
         model.created_at.isoformat(),
         model.completed_at.isoformat() if model.completed_at else None,
         model.schema_version,
+        model.plan_confidence,
+        model.planner_status,
+        model.clarification_question,
+        model.agent_round_count,
+        model.max_agent_rounds,
+        model.max_tool_calls,
+        cast(StopReason | None, model.stop_reason),
     )
 
 
@@ -127,6 +165,237 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             if model is None:
                 raise KeyError(diagnosis_id)
             model.status, model.progress, model.current_step = status, progress, current_step
+
+    def save_agent_plan(
+        self,
+        diagnosis_id: str,
+        *,
+        provider: str,
+        plan: dict[str, object],
+        revision: int,
+        created_at: str,
+    ) -> tuple[str, tuple[str, ...]]:
+        plan_id = str(uuid.uuid4())
+        steps = cast(list[dict[str, object]], plan.get("steps", []))
+        step_ids: list[str] = []
+        with self._sessions.begin() as session:
+            diagnosis = session.get(Diagnosis, diagnosis_id)
+            if diagnosis is None:
+                raise KeyError(diagnosis_id)
+            diagnosis.category = str(plan["problem_category"])
+            diagnosis.plan_confidence = float(cast(float, plan["confidence"]))
+            diagnosis.planner_status = str(plan["status"])
+            diagnosis.clarification_question = cast(str | None, plan["clarification_question"])
+            diagnosis.agent_round_count = max(diagnosis.agent_round_count, revision)
+            existing = cast(list[dict[str, object]], json.loads(diagnosis.plan_json))
+            existing.extend(
+                {
+                    "tool": step["tool"],
+                    "arguments": step.get("arguments", {}),
+                    "purpose": step["reason"],
+                    "reason": step["reason"],
+                }
+                for step in steps
+            )
+            diagnosis.plan_json = json.dumps(existing, ensure_ascii=False)
+            session.add(
+                AgentPlanModel(
+                    id=plan_id,
+                    diagnosis_id=diagnosis_id,
+                    revision=revision,
+                    provider=provider,
+                    problem_category=str(plan["problem_category"]),
+                    confidence=float(cast(float, plan["confidence"])),
+                    status=str(plan["status"]),
+                    plan_json=json.dumps(plan, ensure_ascii=False),
+                    created_at=datetime.fromisoformat(created_at),
+                )
+            )
+            for index, step in enumerate(steps):
+                step_id = str(uuid.uuid4())
+                step_ids.append(step_id)
+                tool, version = str(step["tool"]).rsplit("@", 1)
+                arguments = cast(dict[str, object], step.get("arguments", {}))
+                session.add(
+                    DiagnosisStepModel(
+                        id=step_id,
+                        plan_id=plan_id,
+                        diagnosis_id=diagnosis_id,
+                        sequence=index,
+                        tool_name=tool,
+                        tool_version=version,
+                        reason=str(step["reason"]),
+                        arguments_hash=arguments_hash(arguments),
+                        status="planned",
+                        created_at=datetime.fromisoformat(created_at),
+                    )
+                )
+        return plan_id, tuple(step_ids)
+
+    def finish_diagnosis_step(self, step_id: str, *, status: str, tool_call_id: str | None) -> None:
+        with self._sessions.begin() as session:
+            model = session.get(DiagnosisStepModel, step_id)
+            if model is None:
+                raise KeyError(step_id)
+            model.status = status
+            model.tool_call_id = tool_call_id
+
+    def add_agent_decision(
+        self,
+        diagnosis_id: str,
+        *,
+        plan_id: str | None,
+        decision_type: str,
+        reason: str,
+        data: dict[str, object],
+        created_at: str,
+    ) -> None:
+        with self._sessions.begin() as session:
+            session.add(
+                AgentDecisionModel(
+                    diagnosis_id=diagnosis_id,
+                    plan_id=plan_id,
+                    decision_type=decision_type,
+                    reason=reason,
+                    data_json=json.dumps(data, ensure_ascii=False),
+                    created_at=datetime.fromisoformat(created_at),
+                )
+            )
+
+    def wait_for_input(self, diagnosis_id: str, *, question: str) -> DiagnosisRecord:
+        with self._sessions.begin() as session:
+            model = session.get(Diagnosis, diagnosis_id)
+            if model is None:
+                raise KeyError(diagnosis_id)
+            model.status = "waiting_user_input"
+            model.current_step = question
+            model.progress = 5
+        return _record(model)
+
+    def resume_with_input(
+        self, diagnosis_id: str, *, input_text: str, created_at: str
+    ) -> DiagnosisRecord | None:
+        with self._sessions.begin() as session:
+            claimed_id = session.scalar(
+                update(Diagnosis)
+                .where(
+                    Diagnosis.id == diagnosis_id,
+                    Diagnosis.status == "waiting_user_input",
+                )
+                .values(
+                    status="running",
+                    current_step="正在根据补充信息调整检查项目",
+                    clarification_question=None,
+                    failure_code=None,
+                    failure_message=None,
+                    completed_at=None,
+                )
+                .returning(Diagnosis.id)
+            )
+            if claimed_id is None:
+                return None
+            sequence = (
+                session.scalar(
+                    select(func.count(TaskUserInputModel.id)).where(
+                        TaskUserInputModel.diagnosis_id == diagnosis_id
+                    )
+                )
+                or 0
+            )
+            session.add(
+                TaskUserInputModel(
+                    diagnosis_id=diagnosis_id,
+                    sequence=sequence + 1,
+                    input_text=input_text,
+                    created_at=datetime.fromisoformat(created_at),
+                )
+            )
+            model = session.get(Diagnosis, diagnosis_id)
+            if model is None:
+                raise KeyError(diagnosis_id)
+        return _record(model)
+
+    def user_inputs(self, diagnosis_id: str) -> tuple[str, ...]:
+        with self._sessions() as session:
+            statement = (
+                select(TaskUserInputModel.input_text)
+                .where(TaskUserInputModel.diagnosis_id == diagnosis_id)
+                .order_by(TaskUserInputModel.sequence)
+            )
+            return tuple(session.scalars(statement))
+
+    def replace_hypotheses(
+        self,
+        diagnosis_id: str,
+        *,
+        hypotheses: tuple[DiagnosisHypothesis, ...],
+        updated_at: str,
+    ) -> None:
+        timestamp = datetime.fromisoformat(updated_at)
+        with self._sessions.begin() as session:
+            existing = {
+                item.hypothesis_key: item
+                for item in session.scalars(
+                    select(DiagnosisHypothesisModel).where(
+                        DiagnosisHypothesisModel.diagnosis_id == diagnosis_id
+                    )
+                )
+            }
+            active_keys: set[str] = set()
+            for hypothesis in hypotheses:
+                active_keys.add(hypothesis.key)
+                model = existing.get(hypothesis.key)
+                if model is None:
+                    model = DiagnosisHypothesisModel(
+                        id=hypothesis.id,
+                        diagnosis_id=diagnosis_id,
+                        hypothesis_key=hypothesis.key,
+                        created_at=timestamp,
+                    )
+                    session.add(model)
+                model.hypothesis = hypothesis.hypothesis
+                model.rationale = hypothesis.rationale
+                model.supporting_evidence_json = json.dumps(
+                    [asdict(item) for item in hypothesis.supporting_evidence], ensure_ascii=False
+                )
+                model.contradicting_evidence_json = json.dumps(
+                    [asdict(item) for item in hypothesis.contradicting_evidence],
+                    ensure_ascii=False,
+                )
+                model.confidence = hypothesis.confidence
+                model.status = hypothesis.status
+                model.updated_at = timestamp
+            if active_keys:
+                session.execute(
+                    delete(DiagnosisHypothesisModel).where(
+                        DiagnosisHypothesisModel.diagnosis_id == diagnosis_id,
+                        DiagnosisHypothesisModel.hypothesis_key.not_in(active_keys),
+                    )
+                )
+
+    def record_stop_reason(
+        self,
+        diagnosis_id: str,
+        *,
+        reason: StopReason,
+        detail: str,
+        terminal_status: str,
+        created_at: str,
+    ) -> None:
+        with self._sessions.begin() as session:
+            diagnosis = session.get(Diagnosis, diagnosis_id)
+            if diagnosis is None:
+                raise KeyError(diagnosis_id)
+            diagnosis.stop_reason = reason
+            session.add(
+                AgentStopReasonModel(
+                    diagnosis_id=diagnosis_id,
+                    reason=reason,
+                    detail=detail,
+                    terminal_status=terminal_status,
+                    created_at=datetime.fromisoformat(created_at),
+                )
+            )
 
     def complete(
         self,
@@ -228,6 +497,8 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                     if item.summary_json
                     else None,
                     item.error_code,
+                    item.started_at.isoformat(),
+                    item.finished_at.isoformat() if item.finished_at else None,
                 )
                 for item in session.scalars(statement)
             )
@@ -258,6 +529,16 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                 model.status, model.failure_code = "interrupted", "backend_restarted"
                 model.failure_message = "本地服务重启，诊断未自动重放。"
                 model.completed_at = datetime.fromisoformat(completed_at)
+                model.stop_reason = "risk_limit_reached"
+                session.add(
+                    AgentStopReasonModel(
+                        diagnosis_id=model.id,
+                        reason="risk_limit_reached",
+                        detail="本地服务重启，中断中的工具调用不会自动重放。",
+                        terminal_status="interrupted",
+                        created_at=datetime.fromisoformat(completed_at),
+                    )
+                )
             return len(models)
 
     def add_model_call(
