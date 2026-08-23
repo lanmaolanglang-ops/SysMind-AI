@@ -28,7 +28,7 @@ when either signing mechanism is unavailable. Windows signs the frozen backend b
 then Tauri signs the desktop executable and installer. Unsigned local packages are development
 artifacts and cannot be promoted as releases.
 
-Uninstall preserves `%LOCALAPPDATA%\\ai.sysmind.desktop` by default. Tauri's interactive uninstaller
+Uninstall preserves `%LOCALAPPDATA%\ai.sysmind.desktop` by default. Tauri's interactive uninstaller
 offers a separate opt-in deletion checkbox; silent uninstall and updater-driven replacement preserve it. Normal
 startup runs all pending Alembic migrations. Downgrades are unsupported because migration history is
 forward-only for releases.

@@ -9,10 +9,17 @@ explicitly exports a report or enables a remote model provider.
 ## Optional model data flow
 
 Without a configured Provider, scans and diagnosis reports remain local and use deterministic rules.
-When a Provider is configured, it receives only the bounded deterministic finding projection:
-category, code, severity, title, explanation, confidence, and evidence identifiers/field paths. The
-raw user question and complete tool results are not sent. Provider prose is labelled auxiliary and
-cannot create findings, evidence, confirmations, or action controls.
+When a Provider is configured, diagnosis planning may send the redacted current question, a minimal
+device/capability summary, bounded descriptions of eligible read-only tools, and bounded redacted
+observation summaries from completed tools. Report explanation may send the deterministic finding
+projection: category, code, severity, title, explanation, confidence, and evidence identifiers/field
+paths. Provider prose is labelled auxiliary and cannot create findings, evidence, confirmations, or
+action controls.
+
+SysMind AI does not send complete tool results, raw event logs or event XML, credentials, user file
+contents, confirmation tickets, or system-modification capabilities to a Provider. Redaction reduces
+exposure but cannot guarantee that every user-entered sentence is anonymous; do not enter secrets or
+unnecessary personal information in a diagnosis question.
 
 ## Data stored locally
 
@@ -22,7 +29,7 @@ cannot create findings, evidence, confirmations, or action controls.
   session tokens, provider keys, and complete sensitive requests are excluded.
 - Startup-item recovery material is stored in the application's private local-data directory so a
   user-confirmed restore can be attempted safely.
-- The Tauri installation uses `%LOCALAPPDATA%\\ai.sysmind.desktop`. Interactive uninstall asks
+- The Tauri installation uses `%LOCALAPPDATA%\ai.sysmind.desktop`. Interactive uninstall asks
   separately before deleting that directory; upgrades and silent uninstall preserve it.
 
 The user can export redacted JSON or Markdown reports. Export is an explicit action and the selected
@@ -36,9 +43,9 @@ destination is outside SysMind AI's retention control.
 - Checking for an application update contacts the configured HTTPS release endpoint. The release
   host can observe normal connection metadata such as IP address and user agent; diagnostic content
   is not included.
-- The default Fake Provider is offline. If a remote model provider is enabled in a future supported
-  configuration, only the bounded, redacted evidence projection documented by the application is
-  sent. Raw event XML and complete tool results remain local.
+- The default deterministic Provider is offline. If a remote model provider is enabled, only the
+  bounded planning and explanation context described above is sent. Raw event XML and complete tool
+  results remain local.
 
 ## Credentials
 

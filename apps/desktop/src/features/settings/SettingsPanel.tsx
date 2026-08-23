@@ -53,7 +53,7 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
       .then((value) => {
         setSettings(value);
         setApiKey("");
-        setMessage("设置已保存。密钥已移交 Windows 凭据管理器，表单内存已清空。");
+        setMessage("设置已保存。访问密钥已交给 Windows 安全保存，并已从当前表单清除。");
       })
       .catch(() => setMessage("设置未保存。请检查 HTTPS 地址、模型名称和凭据。"))
       .finally(() => setBusy(false));
@@ -79,7 +79,7 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
       .then((value) => {
         setSettings(value);
         setApiKey("");
-        setMessage("Provider 凭据已清除，诊断将使用本地规则。");
+        setMessage("在线解释的访问密钥已清除，诊断将继续使用本地规则。");
       })
       .finally(() => setBusy(false));
   };
@@ -104,28 +104,28 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
     <section className="settings-panel" aria-labelledby="settings-title">
       <header>
         <div>
-          <h2 id="settings-title">模型与隐私</h2>
-          <p>云模型只接收确定性 finding 投影，不接收原始问题、完整工具结果或动作入口。</p>
+          <h2 id="settings-title">在线解释与隐私</h2>
+          <p>在线模型可能接收脱敏后的问题、最小设备摘要、只读工具说明和有界观察摘要；不会接收原始日志、完整事件 XML、凭据、用户文件或系统修改权限。</p>
         </div>
         <span className="diagnosis-mode">
-          {settings?.configured ? "真实模型已配置" : "本地规则模式"}
+          {settings?.configured ? "在线解释已开启" : "仅本地分析"}
         </span>
       </header>
       {!settings?.configured && (
         <div className="privacy-notice" role="note">
           <strong>首次使用说明</strong>
-          <p>不配置 Provider 也可使用本地扫描与规则报告。API Key 不会写入数据库、日志或浏览器存储。</p>
+          <p>不配置在线模型也能正常诊断。访问密钥不会写入数据库、日志或浏览器存储。</p>
         </div>
       )}
       <div className="settings-grid">
-        <label>兼容端点<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
-        <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} /></label>
-        <label>API Key<input type="password" autoComplete="off" value={apiKey} placeholder={settings?.configured ? "已安全保存；留空表示不替换" : "仅保留在当前表单内存"} onChange={(event) => setApiKey(event.target.value)} /></label>
+        <label>服务地址<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
+        <label>模型名称<input value={model} onChange={(event) => setModel(event.target.value)} /></label>
+        <label>访问密钥<input type="password" autoComplete="off" value={apiKey} placeholder={settings?.configured ? "已安全保存；留空表示不替换" : "只在保存时短暂使用"} onChange={(event) => setApiKey(event.target.value)} /></label>
       </div>
       <div className="settings-actions">
         <button type="button" className="primary-action" onClick={save} disabled={busy || !model.trim() || !endpoint.trim()}>保存设置</button>
         <button type="button" onClick={test} disabled={busy || !settings?.configured}>测试连接</button>
-        <button type="button" onClick={clear} disabled={busy || !settings?.configured}>清除凭据</button>
+        <button type="button" onClick={clear} disabled={busy || !settings?.configured}>清除访问密钥</button>
       </div>
       {message && <p role="status" className="diagnosis-message">{message}</p>}
       <div className="retention-settings">

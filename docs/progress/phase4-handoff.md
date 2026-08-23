@@ -1,7 +1,7 @@
 # SysMind AI 新对话交接说明
 
 更新时间：2026-08-19
-工作区：`D:\SysMind AI`
+工作区：仓库根目录
 
 ## 给新对话的首要说明
 
@@ -126,7 +126,7 @@ Phase 4 已按 PRD 完成，核心状态如下：
 命令：
 
 ```powershell
-Set-Location 'D:\SysMind AI\services\backend'
+Set-Location '<repository-root>\services\backend'
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m mypy src
 .\.venv\Scripts\python.exe -m pytest -q
@@ -142,7 +142,7 @@ Set-Location 'D:\SysMind AI\services\backend'
 命令：
 
 ```powershell
-Set-Location 'D:\SysMind AI'
+Set-Location '<repository-root>'
 pnpm lint
 pnpm typecheck
 pnpm test -- --run
@@ -157,7 +157,7 @@ pnpm build
 命令：
 
 ```powershell
-Set-Location 'D:\SysMind AI\apps\desktop\src-tauri'
+Set-Location '<repository-root>\apps\desktop\src-tauri'
 cargo fmt --check
 cargo test
 ```
@@ -172,11 +172,11 @@ cargo test
 命令：
 
 ```powershell
-Set-Location 'D:\SysMind AI\services\backend'
+Set-Location '<repository-root>\services\backend'
 .\.venv\Scripts\python.exe -m alembic heads
 .\.venv\Scripts\python.exe -m pytest -m windows_smoke -q
 
-Set-Location 'D:\SysMind AI'
+Set-Location '<repository-root>'
 .\services\backend\.venv\Scripts\python.exe .\scripts\export-openapi.py
 ```
 

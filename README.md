@@ -1,8 +1,25 @@
 # SysMind AI
 
-SysMind AI is a local-first Windows desktop foundation for an explainable computer diagnostic assistant. Phase 6 adds a frozen Python sidecar, per-user NSIS packaging, single-instance ownership, signed in-app updates, and release integrity gates. Phase 5 controlled actions remain narrowly evidence-bound. The application does **not** execute model-authored commands, manage services, elevate privileges, or expose generic system changes.
+SysMind AI is a local-first Windows diagnostic assistant for ordinary users. The current Release Candidate turns a plain-language symptom into a bounded plan, real local evidence, an uncertainty-aware report, and safe next steps. Every important conclusion exposes its evidence source, observation time, and key metric while technical identifiers stay behind disclosure. The application does **not** execute model-authored commands, manage services, elevate privileges, or expose generic system changes.
+
+RC2 has also been exercised as an unsigned Local Validation Build on one Windows 11 x64 device,
+including real diagnosis tools, fresh-data startup, bundled-backend lifecycle, silent install, and
+data-preserving uninstall. This is single-device evidence, not a signed production-release claim.
 
 The product and architecture baseline is [docs/SysMind-AI-PRD-and-Architecture.md](docs/SysMind-AI-PRD-and-Architecture.md).
+
+## Get the preview
+
+v0.1.0-preview targets Windows 10/11 x64. Download the installer and its checksum from the
+[GitHub Releases page](https://github.com/lanmaolanglang-ops/SysMind-AI/releases), verify the SHA-256
+value, and run the per-user installer. No separate Python or Node.js installation is required for
+the packaged application.
+
+The current Local Validation Build is unsigned. Windows may identify its publisher as unknown; use
+it only when you trust the repository and have verified the published checksum. It is a preview, not
+a production-signed release. See [INSTALL.md](INSTALL.md) for installation and uninstall behavior,
+[USER_GUIDE.md](USER_GUIDE.md) for the diagnosis flow, and [LIMITATIONS.md](LIMITATIONS.md) before
+using the preview.
 
 ## Architecture at a glance
 
@@ -23,7 +40,7 @@ Tauri 2 process owner ───── starts/stops ───── Python FastAP
 
 The Tauri process owns the exact child process it creates. On Windows, the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`; normal exit first requests graceful backend shutdown and only terminates that owned child after a timeout. A development launcher uses Python today and the same abstraction accepts a frozen executable later.
 
-## Current Phase 6 capabilities
+## Current v0.1.0-preview capabilities
 
 - Start, monitor, cancel, and revisit a local quick scan.
 - Collect normalized OS, CPU, GPU, memory, fixed-volume, process snapshot, and high-usage process evidence.
@@ -41,9 +58,21 @@ The Tauri process owns the exact child process it creates. On Windows, the child
 - Enforce total time, reasoning-round, tool-call, repeated-call, per-tool concurrency, and global task-concurrency budgets.
 - Use a deterministic offline Fake Provider by default, with a tested OpenAI-compatible Chat Completions adapter available for server-side composition.
 - Keep complete tool results and call audit data local; only bounded tool summaries enter subsequent model context.
-- Classify performance, network, and application-crash questions into application-authored diagnostic plans.
+- Build persisted, structured diagnosis plans from the user question and the installed Tool Registry;
+  every selected tool has a reason and validated typed arguments.
+- Re-plan adaptively within four rounds and eight tool calls, or ask for missing symptom information;
+  user answers resume the same persisted diagnosis while the deterministic Fake Planner remains offline-capable.
+- Persist evidence-backed diagnostic hypotheses and explicit stop reasons, and skip completed tools
+  if a resumed plan selects them again.
+- Treat capability observations separately from diagnostic conclusions, reduce confidence when tool
+  coverage is incomplete, and state plainly when current evidence cannot determine a cause.
+- Preserve partial evidence reports when a tool fails or a bounded planning budget is reached.
 - Inspect current-user/WinHTTP proxy metadata, fixed allowlisted DNS and ICMP targets, startup sources, scheduled-task names, and Windows service metadata.
 - Generate deterministic local findings before optional model explanation; every finding references a completed tool call and field path.
+- Project every conclusion to its tool-call ID, exact tool version, key fields, and bounded original
+  result summary; unsupported evidence references fail closed.
+- Present evidence source, observation time, and key metrics in plain language before technical
+  tool-call IDs and field paths, including redacted Markdown and JSON exports.
 - Preserve partial reports when tools or the model fail, and explicitly list ambiguity, unavailable evidence, and other limitations.
 - Revisit report history, submit helpful/not-helpful feedback, and export redacted JSON or Markdown.
 - Generate a diagnosis-bound plan for one current-user startup item, record an explicit per-item decision, revalidate the target, verify the result, and offer conflict-safe recovery.
@@ -57,7 +86,9 @@ The Tauri process owns the exact child process it creates. On Windows, the child
 - The backend host is a validated literal `127.0.0.1`; `0.0.0.0` is rejected.
 - Every API request requires an ephemeral `X-SysMind-Session` token.
 - Browser/Tauri origins are allowlisted and correlation IDs cross the API boundary.
-- Provider credentials are injected server-side only and are never accepted from the browser, persisted in SQLite, or logged. `FakeSecretService` remains memory-only.
+- Provider credentials are submitted only through the authenticated local settings flow, held briefly
+  in form/request memory, and stored by the backend in Windows Credential Manager. They are never
+  persisted in SQLite, browser storage, reports, or logs. `FakeSecretService` remains memory-only.
 - Logs are structured JSON and redact common secret fields.
 - Collectors are application-owned, versioned, timeout-bounded, and read-only.
 - GPU detection uses one fixed application-authored CIM query; no user or model input reaches PowerShell.
@@ -71,7 +102,10 @@ The Tauri process owns the exact child process it creates. On Windows, the child
 - Agent prompts treat goals and tool evidence as untrusted data. State-changing startup actions use a separate application-authored executor and cannot be selected by a model.
 - Confirmation tickets are single-use, expire within two minutes, and bind the action, target revision, parameters, and sidecar session; only their digest is audited.
 - Network tools use fixed application allowlists (`one.one.one.one`, `www.microsoft.com`, `1.1.1.1`, and `8.8.8.8`) plus hard count and timeout bounds. Starting a network diagnosis is the explicit user action that authorizes this limited traffic.
-- Provider report synthesis receives deterministic finding summaries, not complete tool results or the raw user question; provider failures fall back to local rules.
+- A configured remote Provider may receive the redacted current question, a minimal device summary,
+  eligible read-only tool descriptions, and bounded redacted observation/finding summaries. Complete
+  tool results, raw event XML, credentials, user files, and system-modification capabilities remain
+  local; provider failures fall back to local rules.
 
 ## Development requirements
 
@@ -198,10 +232,17 @@ Disposable Windows install/uninstall checks are gated in the same way as Phase 5
   -ConfirmIsolatedEnvironment
 ```
 
-See [the release checklist](docs/release-checklist.md), [privacy notice](docs/privacy.md),
+See [the installation guide](INSTALL.md), [user guide](USER_GUIDE.md),
+[current limitations](LIMITATIONS.md), [release checklist](docs/release-checklist.md),
+[privacy notice](docs/privacy.md),
 [security policy](.github/SECURITY.md), [security model](docs/security.md),
 [v0.1.0 release notes](docs/releases/v0.1.0.md), and
 [third-party license notes](docs/third-party-licenses.md).
+
+The minimal RC1 product-validation scenarios are recorded under
+[docs/cases/](docs/cases/README.md).
+The current-device RC2 record is
+[docs/progress/release-candidate-2-local-validation-complete.md](docs/progress/release-candidate-2-local-validation-complete.md).
 
 ## License
 
@@ -216,6 +257,9 @@ services/backend/          FastAPI application, infrastructure, migrations, test
 contracts/openapi/         Generated local API contract
 contracts/schemas/         Non-HTTP process protocol schemas
 docs/adr/                  Accepted architecture decisions
+INSTALL.md                 Preview installation and uninstall instructions
+USER_GUIDE.md              Ordinary-user diagnosis walkthrough
+LIMITATIONS.md             Supported scope and known limitations
 .impeccable/design.json    Machine-readable snapshot of the provisional UI system
 scripts/                   Development and contract utilities
 tests/integration/         Cross-process smoke-test scaffold
