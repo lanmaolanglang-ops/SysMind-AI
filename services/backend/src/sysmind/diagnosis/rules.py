@@ -9,6 +9,7 @@ from sysmind.domain.diagnosis import (
     EvidenceReference,
     Finding,
     Severity,
+    diagnostic_findings,
 )
 
 
@@ -163,17 +164,22 @@ def build_findings(
             ping = result.get("ping")
             failures = {
                 str(item)
-                for item in cast(
-                    list[object] | tuple[object, ...], result.get("failures", ())
-                )
+                for item in cast(list[object] | tuple[object, ...], result.get("failures", ()))
             }
             public_reachable = result.get("public_reachable")
             active_adapter_count = result.get("active_adapter_count")
+            active_adapter_path: str | None = None
+            if active_adapter_count is not None:
+                active_adapter_path = "$.active_adapter_count"
             if active_adapter_count is None:
-                active_adapter_count = (
-                    result.get("adapter_count", 0) if result.get("has_default_route") else 0
-                )
-            if int(cast(int | str, active_adapter_count)) == 0:
+                active_adapter_count = result.get("adapter_count")
+                if active_adapter_count is not None:
+                    active_adapter_path = "$.adapter_count"
+            if (
+                active_adapter_count is not None
+                and active_adapter_path is not None
+                and int(cast(int | str, active_adapter_count)) == 0
+            ):
                 findings.append(
                     _finding(
                         "no_active_adapter",
@@ -183,7 +189,7 @@ def build_findings(
                         "检查飞行模式、网卡状态和物理连接。",
                         0.92,
                         call,
-                        "$.active_adapter_count",
+                        active_adapter_path,
                     )
                 )
             elif result.get("has_default_route") is False:
@@ -247,6 +253,11 @@ def build_findings(
                     )
                 )
                 if result.get("gateway_reachable") is True or public_reachable is True:
+                    connectivity_path = (
+                        "$.gateway_reachable"
+                        if result.get("gateway_reachable") is True
+                        else "$.public_reachable"
+                    )
                     findings.append(
                         Finding(
                             id=str(uuid.uuid4()),
@@ -261,7 +272,7 @@ def build_findings(
                             ),
                             confidence=0.88,
                             evidence=(
-                                EvidenceReference(call.id, "$.gateway_reachable"),
+                                EvidenceReference(call.id, connectivity_path),
                                 EvidenceReference(call.id, "$.dns"),
                             ),
                         )
@@ -321,14 +332,14 @@ def build_findings(
                     "$",
                 )
             )
-    if not findings and successful:
+    if not diagnostic_findings(tuple(findings)) and successful:
         call = successful[0]
         findings.append(
             _finding(
                 "insufficient_signal",
                 "info",
                 "未发现达到规则阈值的异常",
-                "已完成计划内只读检查，但当前快照没有形成确定性异常结论。",
+                "当前证据不足，无法确定原因。已完成的只读检查没有形成确定性异常结论。",
                 "若问题可复现，请在发生时重新诊断并补充具体应用或时间。",
                 0.45,
                 call,

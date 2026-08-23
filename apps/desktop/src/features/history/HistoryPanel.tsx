@@ -30,6 +30,7 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
   const [impact, setImpact] = useState<DeletionImpact | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [baseline, setBaseline] = useState<BaselineMetric[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -59,7 +60,7 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
         if (!controller.signal.aborted) setError("历史记录暂时不可用。");
       });
     return () => controller.abort();
-  }, [client]);
+  }, [client, reloadKey]);
 
   const visible = useMemo(
     () => items.filter((item) => filter === "all" || item.kind === filter),
@@ -96,6 +97,14 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
   const metricLabels: Record<BaselineMetric["metric"], string> = {
     cpu_percent: "CPU", memory_percent: "内存", disk_peak_percent: "磁盘峰值",
   };
+  const kindLabels: Record<Exclude<HistoryKind, "all">, string> = {
+    scan: "设备扫描", diagnosis: "问题诊断", log: "事件日志", action: "安全操作",
+  };
+  const statusLabels: Record<string, string> = {
+    queued: "等待开始", running: "正在进行", completed: "已完成", partial: "部分完成",
+    failed: "未完成", cancelled: "已取消", interrupted: "意外中断", succeeded: "操作成功",
+    rejected: "已拒绝", close_pending: "等待进一步决定",
+  };
 
   return (
     <section className="history-panel" aria-labelledby="history-title">
@@ -105,7 +114,7 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
           <option value="diagnosis">诊断</option><option value="log">日志</option>
           <option value="action">动作</option>
         </select></label></header>
-      {error && <p role="alert" className="inline-error">{error}</p>}
+      {error && <div role="alert" className="inline-error"><span>{error}</span><button type="button" onClick={() => setReloadKey((value) => value + 1)}>重新加载</button></div>}
       <div className="history-baseline" aria-label="最近扫描基线">
         <strong>最近扫描基线</strong>
         {baseline.length === 0 ? <span>至少完成两次扫描后生成趋势。</span> : baseline.map((metric) => (
@@ -122,8 +131,8 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
       </div>}
       {!error && visible.length === 0 && <p>暂无数据。先运行一次扫描或诊断。</p>}
       <ul className="history-list">{visible.map((item) => <li key={`${item.kind}-${item.id}`}>
-        <div><strong>{item.title}</strong><small>{item.kind} · {item.id}</small></div>
-        <span>{item.status}{item.timestamp ? ` · ${new Date(item.timestamp).toLocaleString("zh-CN")}` : ""}</span>
+        <div><strong>{item.title}</strong><small>{kindLabels[item.kind]}</small><details className="history-technical"><summary>记录编号</summary><code>{item.id}</code></details></div>
+        <span>{statusLabels[item.status] ?? "状态未知"}{item.timestamp ? ` · ${new Date(item.timestamp).toLocaleString("zh-CN")}` : ""}</span>
         {item.kind === "action" ? <small>强制保留审计</small> : <button type="button" onClick={() => previewDeletion(item)} disabled={busyId !== null}>删除…</button>}
       </li>)}</ul>
     </section>

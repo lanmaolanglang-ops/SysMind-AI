@@ -35,16 +35,17 @@ describe("ControlledActions", () => {
       .mockResolvedValueOnce({ ...proposed, status: "succeeded", recovery_available: true });
     render(<ControlledActions client={client} diagnosisId="diagnosis-1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "查看启动项" }));
-    fireEvent.click(await screen.findByRole("button", { name: "生成禁用计划" }));
+    fireEvent.click(screen.getByRole("button", { name: "减少开机负担" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看停用方案" }));
     expect(await screen.findByText(/不会在下次登录时自动启动/)).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "操作确认" })).toHaveFocus();
     expect(post).not.toHaveBeenCalled();
     expect(postJson).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "我已了解，确认禁用" }));
+    fireEvent.click(screen.getByRole("button", { name: "我已了解，确认停用" }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/actions/action-1/confirm"));
     expect(await screen.findByText("启动项已禁用并验证")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "生成恢复计划" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "恢复自动启动" })).toBeInTheDocument();
   });
 
   it("never escalates a pending GUI close request to forced termination", async () => {
@@ -87,18 +88,18 @@ describe("ControlledActions", () => {
       .mockResolvedValueOnce({ ...terminateAction, status: "succeeded" });
     render(<ControlledActions client={client} diagnosisId="diagnosis-1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "查看可关闭应用" }));
-    fireEvent.click(await screen.findByRole("button", { name: "生成关闭请求" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看高占用应用" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看关闭方案" }));
     expect(await screen.findByText(/不会自动升级为强制终止/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "我已了解，确认请求关闭" }));
+    fireEvent.click(screen.getByRole("button", { name: "我已了解，确认关闭" }));
 
     expect(await screen.findByText(/尚未执行强制终止/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "生成强制终止计划" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看强制关闭方案" }));
     expect(await screen.findByText(/未保存内容会丢失/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "我已了解数据丢失风险" }));
     expect(await screen.findByText(/第二次也是最终确认/)).toBeInTheDocument();
     expect(screen.queryByText("应用已强制终止并验证")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "再次确认并强制终止" }));
+    fireEvent.click(screen.getByRole("button", { name: "再次确认并强制关闭" }));
     expect(await screen.findByText("应用已强制终止并验证")).toBeInTheDocument();
     expect(post).toHaveBeenCalledTimes(4);
   });
@@ -119,9 +120,9 @@ describe("ControlledActions", () => {
       .mockRejectedValueOnce(new ApiClientError("network_error", "disconnected"));
     render(<ControlledActions client={client} diagnosisId="diagnosis-1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "查看启动项" }));
-    fireEvent.click(await screen.findByRole("button", { name: "生成禁用计划" }));
-    fireEvent.click(await screen.findByRole("button", { name: "我已了解，确认禁用" }));
+    fireEvent.click(screen.getByRole("button", { name: "减少开机负担" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看停用方案" }));
+    fireEvent.click(await screen.findByRole("button", { name: "我已了解，确认停用" }));
 
     expect(await screen.findByText("启动项已禁用并验证")).toBeInTheDocument();
     expect(postJson).toHaveBeenCalledTimes(2);

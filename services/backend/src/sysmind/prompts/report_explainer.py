@@ -39,7 +39,7 @@ class LocalReportExplainer:
     ) -> str:
         del category, question
         if not findings:
-            return "本地规则没有足够证据形成解释。"
+            return "当前证据不足，无法确定原因。建议在问题复现时重新诊断并补充发生场景。"
         return "；".join(f"{item.title}（置信度 {item.confidence:.0%}）" for item in findings)
 
 
