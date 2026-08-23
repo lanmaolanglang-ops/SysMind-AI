@@ -44,6 +44,7 @@ class ProviderRequest:
     tools: tuple[ToolDescriptor, ...]
     messages: tuple[dict[str, object], ...] = ()
     max_output_tokens: int = 800
+    response_format: Literal["agent_action", "structured_plan"] = "agent_action"
 
 
 @dataclass(frozen=True, slots=True)

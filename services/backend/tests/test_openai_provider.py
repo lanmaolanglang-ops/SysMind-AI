@@ -78,6 +78,28 @@ async def test_openai_compatible_maps_structured_tool_call_without_exposing_key(
 
 
 @pytest.mark.anyio
+async def test_openai_compatible_preserves_structured_diagnosis_plan() -> None:
+    plan = {
+        "problem_category": "performance",
+        "confidence": 0.82,
+        "status": "ready",
+        "clarification_question": None,
+        "steps": [{"tool": "test.echo@1.0", "reason": "check value", "arguments": {"value": 1}}],
+    }
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(plan)}}]},
+        )
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await OpenAICompatibleProvider(_config(), client=client).complete(_request())
+
+    assert response.action.type == "finalize"
+    assert json.loads(response.action.content or "{}") == plan
+
+
+@pytest.mark.anyio
 async def test_openai_compatible_maps_rate_limit() -> None:
     transport = httpx.MockTransport(lambda _request: httpx.Response(429))
     async with httpx.AsyncClient(transport=transport) as client:

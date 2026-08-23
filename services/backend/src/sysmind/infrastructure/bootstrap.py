@@ -3,6 +3,7 @@ from pathlib import Path
 
 from sysmind.actions import ActionCoordinator
 from sysmind.agent.contracts import AgentProvider
+from sysmind.agent.planning import FakeDiagnosisPlanner, ProviderDiagnosisPlanner
 from sysmind.agent.providers import FakeProvider
 from sysmind.application.ports.secrets import SecretService
 from sysmind.application.services import (
@@ -117,7 +118,14 @@ def create_diagnosis_coordinator(
                 return ProviderReportExplainer(provider)
         return LocalReportExplainer()
 
-    return DiagnosisCoordinator(repository, registry, explainer_factory)
+    def planner_factory() -> FakeDiagnosisPlanner | ProviderDiagnosisPlanner:
+        if provider_settings is not None:
+            provider = provider_settings.configured_provider()
+            if provider is not None:
+                return ProviderDiagnosisPlanner(registry, provider)
+        return FakeDiagnosisPlanner(registry)
+
+    return DiagnosisCoordinator(repository, registry, explainer_factory, planner_factory)
 
 
 def create_action_coordinator(

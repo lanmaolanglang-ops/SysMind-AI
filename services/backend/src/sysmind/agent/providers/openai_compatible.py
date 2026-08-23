@@ -81,7 +81,9 @@ class OpenAICompatibleProvider(AgentProvider):
         messages: list[dict[str, object]] = [
             {
                 "role": "system",
-                "content": (
+                "content": request.system_prompt
+                if request.response_format == "structured_plan"
+                else (
                     f"{request.system_prompt}\n"
                     "When not calling a tool, return JSON with action finalize, ask_user, or abort "
                     "and a user-visible content string."
@@ -179,6 +181,11 @@ class OpenAICompatibleProvider(AgentProvider):
             return ProviderAction("finalize", content=content[:4000])
         if not isinstance(parsed, dict):
             raise ProviderProtocolError("The provider action must be a JSON object.")
+        if {"problem_category", "confidence", "status", "steps"} <= parsed.keys():
+            return ProviderAction(
+                "finalize",
+                content=json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))[:4000],
+            )
         action_value = parsed.get("action")
         action_content = parsed.get("content")
         if action_value not in _ACTION_TYPES or not isinstance(action_content, str):
