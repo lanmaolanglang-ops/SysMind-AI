@@ -296,6 +296,16 @@ class ActionCoordinator:
                     error_code="bounded_os_error",
                     error_message="Windows could not complete the bounded action.",
                 )
+            except Exception:
+                # The confirmation is already consumed; the action must always reach a
+                # terminal state instead of staying "executing" until the next restart.
+                return self._repository.set_status(
+                    action.id,
+                    status="failed",
+                    updated_at=_now(),
+                    error_code="action_failed",
+                    error_message="受控动作未完成，系统没有改变；请重新生成计划。",
+                )
 
     def get(self, action_id: str) -> ActionRecord | None:
         return self._repository.get(action_id)

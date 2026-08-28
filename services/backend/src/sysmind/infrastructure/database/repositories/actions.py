@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
-from typing import cast
+from datetime import datetime
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.application.ports.actions import ActionRepository
@@ -207,19 +208,22 @@ class SqlAlchemyActionRepository(ActionRepository):
     def consume_confirmation(self, action_id: str, *, ticket_digest: str, consumed_at: str) -> bool:
         now = datetime.fromisoformat(consumed_at)
         with self._sessions.begin() as session:
-            row = session.scalar(
-                select(UserConfirmationModel).where(
-                    UserConfirmationModel.action_id == action_id,
-                    UserConfirmationModel.ticket_digest == ticket_digest,
-                )
+            # Compare-and-set: a ticket is consumed by exactly one caller even if the
+            # in-process action lock is ever bypassed (second process, refactor, ...).
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(UserConfirmationModel)
+                    .where(
+                        UserConfirmationModel.action_id == action_id,
+                        UserConfirmationModel.ticket_digest == ticket_digest,
+                        UserConfirmationModel.consumed_at.is_(None),
+                        UserConfirmationModel.expires_at >= now,
+                    )
+                    .values(consumed_at=now)
+                ),
             )
-            expires_at = row.expires_at if row is not None else None
-            if expires_at is not None and expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=UTC)
-            if row is None or row.consumed_at is not None or expires_at is None or expires_at < now:
-                return False
-            row.consumed_at = now
-            return True
+            return result.rowcount == 1
 
     def consume_recovery(self, recovery_id: str, *, consumed_at: str) -> None:
         now = datetime.fromisoformat(consumed_at)

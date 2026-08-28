@@ -91,7 +91,16 @@ def log_event(
         extra={
             "component": component,
             "event_type": event_type,
-            "correlation_id": correlation_id,
+            # Correlation IDs come from an external header; clamp them so a hostile
+            # value cannot inject arbitrarily long content into the JSON log stream.
+            "correlation_id": _clamp_text(correlation_id),
             **_sanitize(context),
         },
     )
+
+
+def _clamp_text(value: str | None, limit: int = 64) -> str | None:
+    if value is None:
+        return None
+    clamped = " ".join(value.split())
+    return clamped[:limit]

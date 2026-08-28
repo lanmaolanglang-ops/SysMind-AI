@@ -40,3 +40,4 @@ Thumbs.db
 .impeccable/mocks/
 .impeccable/critique/
 apps/**/.impeccable/
+.coverage

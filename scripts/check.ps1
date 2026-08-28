@@ -19,7 +19,7 @@ if (-not (Test-Path -LiteralPath $backendPython)) {
 }
 
 Invoke-Checked { & (Join-Path $backendBin "ruff.exe") check (Join-Path $PSScriptRoot "..\services\backend") } "Backend lint"
-Invoke-Checked { & (Join-Path $backendBin "mypy.exe") (Join-Path $PSScriptRoot "..\services\backend\src") } "Backend typecheck"
+Invoke-Checked { & (Join-Path $backendBin "mypy.exe") --config-file (Join-Path $PSScriptRoot "..\services\backend\pyproject.toml") (Join-Path $PSScriptRoot "..\services\backend\src") } "Backend typecheck"
 Invoke-Checked { & (Join-Path $backendBin "pytest.exe") (Join-Path $PSScriptRoot "..\services\backend") } "Backend tests"
 Invoke-Checked { pnpm lint } "Frontend lint"
 Invoke-Checked { pnpm typecheck } "Frontend typecheck"

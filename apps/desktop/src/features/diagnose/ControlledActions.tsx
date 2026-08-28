@@ -22,6 +22,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   const [action, setAction] = useState<ControlledAction | null>(null);
   const [original, setOriginal] = useState<ControlledAction | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [canCheckStatus, setCanCheckStatus] = useState(false);
   const diagnosisRef = useRef(diagnosisId);
@@ -38,6 +39,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
     setOriginal(null);
     setMessage(null);
     setCanCheckStatus(false);
+    setReconciling(false);
     return () => statusController.current?.abort();
   }, [diagnosisId]);
 
@@ -51,26 +53,31 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
     const controller = new AbortController();
     statusController.current?.abort();
     statusController.current = controller;
-    setMessage("连接中断，操作结果未知；正在查询审计状态，不会自动重试操作。");
-    for (let attempt = 0; attempt < 8 && !controller.signal.aborted; attempt += 1) {
-      try {
-        const result = await getAction(client, actionId, controller.signal);
-        if (diagnosisRef.current !== expectedDiagnosisId) return;
-        setAction(result);
-        if (result.status !== "executing" && result.status !== "verifying") {
-          setMessage(null);
-          setCanCheckStatus(false);
-          return;
+    setReconciling(true);
+    try {
+      setMessage("连接中断，操作结果未知；正在查询审计状态，不会自动重试操作。");
+      for (let attempt = 0; attempt < 8 && !controller.signal.aborted; attempt += 1) {
+        try {
+          const result = await getAction(client, actionId, controller.signal);
+          if (diagnosisRef.current !== expectedDiagnosisId) return;
+          setAction(result);
+          if (result.status !== "executing" && result.status !== "verifying") {
+            setMessage(null);
+            setCanCheckStatus(false);
+            return;
+          }
+        } catch (error: unknown) {
+          if (controller.signal.aborted) return;
+          if (!(error instanceof ApiClientError)) break;
         }
-      } catch (error: unknown) {
-        if (controller.signal.aborted) return;
-        if (!(error instanceof ApiClientError)) break;
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 1_000));
-    }
-    if (!controller.signal.aborted && diagnosisRef.current === expectedDiagnosisId) {
-      setCanCheckStatus(true);
-      setMessage("仍无法确认操作结果。请不要重复提交，可以再次检查当前状态。");
+      if (!controller.signal.aborted && diagnosisRef.current === expectedDiagnosisId) {
+        setCanCheckStatus(true);
+        setMessage("仍无法确认操作结果。请不要重复提交，可以再次检查当前状态。");
+      }
+    } finally {
+      setReconciling(false);
     }
   };
 
@@ -181,6 +188,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   const isProcess = action?.tool_name === "process.request_close_current_user";
   const isTerminate = action?.tool_name === "process.terminate_current_user";
   const secondConfirmation = action?.status === "awaiting_second_confirmation";
+  const locked = busy || reconciling;
   return (
     <section ref={sectionRef} tabIndex={-1} className="controlled-actions" aria-labelledby={`actions-${diagnosisId}`}>
       <div className="controlled-actions__heading">
@@ -189,8 +197,8 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
           <p>这些选项来自本次检查证据。SysMind 不会自动执行，每次都会先说明影响并再次确认。</p>
         </div>
         {!action && <div className="controlled-actions__buttons">
-          {!processes && <button type="button" className="primary-action" onClick={loadProcesses} disabled={busy}>查看高占用应用</button>}
-          {!candidates && <button type="button" onClick={load} disabled={busy}>减少开机负担</button>}
+          {!processes && <button type="button" className="primary-action" onClick={loadProcesses} disabled={locked}>查看高占用应用</button>}
+          {!candidates && <button type="button" onClick={load} disabled={locked}>减少开机负担</button>}
         </div>}
       </div>
 
@@ -200,7 +208,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
           {candidates.map((candidate) => (
             <li key={candidate.item_id}>
               <div><strong>{candidate.name}</strong><small>登录 Windows 时自动打开 · 可以恢复</small></div>
-              <button type="button" onClick={() => plan(candidate)} disabled={busy}>查看停用方案</button>
+              <button type="button" onClick={() => plan(candidate)} disabled={locked}>查看停用方案</button>
             </li>
           ))}
         </ul>
@@ -212,7 +220,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
           {processes.map((candidate) => (
             <li key={candidate.item_id}>
               <div><strong>{candidate.name}</strong><small>CPU {candidate.cpu_percent}% · 内存 {candidate.memory_percent}%</small></div>
-              <button type="button" onClick={() => planProcess(candidate)} disabled={busy}>查看关闭方案</button>
+              <button type="button" onClick={() => planProcess(candidate)} disabled={locked}>查看关闭方案</button>
             </li>
           ))}
         </ul>
@@ -224,8 +232,8 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
           <p>{isTerminate ? "强制终止不可恢复，未保存内容会丢失。该动作只因先前的正常关闭请求未完成而可用。" : isProcess ? "应用可能提示保存。SysMind 不会替你放弃未保存内容，也不会自动升级为强制终止。" : isRestore ? "恢复后，该程序可能在下次登录时自动启动。" : "禁用后，该程序不会在下次登录时自动启动；不会卸载或删除程序。"}</p>
           <p className="confirmation-warning">执行前会再次比较目标身份。确认仅对这一项有效，并在 2 分钟后失效。{isProcess && " 关闭请求最多等待 8 秒。"}{isTerminate && (secondConfirmation ? " 这是第二次也是最终确认。" : " 需要再次确认后才会执行。")}</p>
           <div>
-            <button type="button" className="primary-action" onClick={execute} disabled={busy}>{busy ? "正在验证…" : isTerminate ? (secondConfirmation ? "再次确认并强制关闭" : "我已了解数据丢失风险") : `我已了解，确认${isProcess ? "关闭" : isRestore ? "恢复" : "停用"}`}</button>
-            <button type="button" onClick={reject} disabled={busy}>拒绝并取消</button>
+            <button type="button" className="primary-action" onClick={execute} disabled={locked}>{busy ? "正在验证…" : isTerminate ? (secondConfirmation ? "再次确认并强制关闭" : "我已了解数据丢失风险") : `我已了解，确认${isProcess ? "关闭" : isRestore ? "恢复" : "停用"}`}</button>
+            <button type="button" onClick={reject} disabled={locked}>拒绝并取消</button>
           </div>
         </div>
       )}
@@ -235,15 +243,15 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
           <strong>{action.status === "succeeded" ? (isTerminate ? "应用已强制终止并验证" : isProcess ? "应用已关闭并验证" : isRestore ? "启动项已恢复并验证" : "启动项已禁用并验证") : action.status === "close_pending" ? "应用未在 8 秒内关闭；尚未执行强制终止" : "操作未完成"}</strong>
           {action.error_message && <p>{action.error_message}</p>}
           {!isProcess && !isRestore && action.status === "succeeded" && action.recovery_available && (
-            <button type="button" onClick={prepareRecovery} disabled={busy}>恢复自动启动</button>
+            <button type="button" onClick={prepareRecovery} disabled={locked}>恢复自动启动</button>
           )}
           {isProcess && action.status === "close_pending" && (
-            <button type="button" onClick={prepareTermination} disabled={busy}>查看强制关闭方案</button>
+            <button type="button" onClick={prepareTermination} disabled={locked}>查看强制关闭方案</button>
           )}
         </div>
       )}
       {message && <p className="diagnosis-message" role="status">{message}</p>}
-      {canCheckStatus && <button type="button" onClick={checkStatus} disabled={busy}>检查操作状态</button>}
+      {canCheckStatus && <button type="button" onClick={checkStatus} disabled={locked}>检查操作状态</button>}
     </section>
   );
 }

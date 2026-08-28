@@ -81,6 +81,9 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
         setApiKey("");
         setMessage("在线解释的访问密钥已清除，诊断将继续使用本地规则。");
       })
+      .catch(() =>
+        setMessage("访问密钥未清除：Windows 凭据存储暂时不可用，稍后可重试。"),
+      )
       .finally(() => setBusy(false));
   };
 

@@ -21,7 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "mypy>=1.14,<2",
-  "pytest>=8.3,<9",
+  "pytest>=9,<10",
   "pytest-cov>=6,<8",
   "ruff>=0.9,<1",
   "types-psutil>=7.0,<8",
@@ -54,4 +54,4 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-packages = ["sysmind"]
+files = ["src/sysmind"]
