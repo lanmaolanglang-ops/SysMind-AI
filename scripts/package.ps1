@@ -136,11 +136,19 @@ if ($Release) {
 $overlay | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $overlayPath -Encoding utf8
 
 Push-Location $desktopRoot
+$previousUpdaterAvailability = $env:VITE_SYSMIND_UPDATER_AVAILABLE
 try {
+    $env:VITE_SYSMIND_UPDATER_AVAILABLE = if ($Release) { 'true' } else { 'false' }
     pnpm exec tauri build --config $overlayPath
     if ($LASTEXITCODE -ne 0) { throw "Tauri bundle failed with exit code $LASTEXITCODE." }
 }
 finally {
+    if ($null -eq $previousUpdaterAvailability) {
+        Remove-Item Env:VITE_SYSMIND_UPDATER_AVAILABLE -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:VITE_SYSMIND_UPDATER_AVAILABLE = $previousUpdaterAvailability
+    }
     Pop-Location
 }
 

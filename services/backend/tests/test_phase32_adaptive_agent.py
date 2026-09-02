@@ -12,8 +12,9 @@ from sysmind.api.app import create_app
 from sysmind.core.config import Settings
 from sysmind.diagnosis import DiagnosisCoordinator
 from sysmind.diagnosis.hypotheses import HypothesisEngine
-from sysmind.domain.diagnosis import EvidenceReference
+from sysmind.domain.diagnosis import DiagnosisHypothesis, EvidenceReference
 from sysmind.infrastructure.database import create_session_factory, run_migrations
+from sysmind.infrastructure.database.models import DiagnosisHypothesisModel
 from sysmind.infrastructure.database.repositories import SqlAlchemyDiagnosisRepository
 from sysmind.prompts import LocalReportExplainer
 from sysmind.tools.registry import ToolDefinition, ToolRegistry
@@ -173,6 +174,65 @@ def test_waiting_state_survives_restart_and_can_resume(
         assert response.status_code == 202
         result = _wait(client, "phase32-waiting", auth_headers, {"completed", "partial"})
     assert result["id"] == "phase32-waiting"
+
+
+def test_waiting_for_input_preserves_existing_progress(settings: Settings) -> None:
+    run_migrations(settings.database_url)
+    repository = SqlAlchemyDiagnosisRepository(create_session_factory(settings.database_url))
+    repository.create(
+        diagnosis_id="phase32-progress",
+        question="电脑有点问题",
+        category="performance",
+        provider="phase32-scripted",
+        plan=(),
+        created_at="2026-08-23T00:00:00+00:00",
+    )
+    repository.update_progress(
+        "phase32-progress", status="running", progress=55, current_step="检查 CPU"
+    )
+
+    waiting = repository.wait_for_input("phase32-progress", question="请补充症状")
+
+    assert waiting.progress == 55
+
+
+def test_replacing_hypotheses_with_empty_set_removes_stale_rows(settings: Settings) -> None:
+    run_migrations(settings.database_url)
+    sessions = create_session_factory(settings.database_url)
+    repository = SqlAlchemyDiagnosisRepository(sessions)
+    repository.create(
+        diagnosis_id="phase32-hypotheses",
+        question="电脑有点问题",
+        category="performance",
+        provider="phase32-scripted",
+        plan=(),
+        created_at="2026-08-23T00:00:00+00:00",
+    )
+    repository.replace_hypotheses(
+        "phase32-hypotheses",
+        hypotheses=(
+            DiagnosisHypothesis(
+                id="hypothesis-1",
+                key="cpu-pressure",
+                hypothesis="CPU 压力较高",
+                rationale="存在支持证据",
+                supporting_evidence=(),
+                contradicting_evidence=(),
+                confidence=0.7,
+                status="active",
+            ),
+        ),
+        updated_at="2026-08-23T00:01:00+00:00",
+    )
+
+    repository.replace_hypotheses(
+        "phase32-hypotheses",
+        hypotheses=(),
+        updated_at="2026-08-23T00:02:00+00:00",
+    )
+
+    with sessions() as session:
+        assert session.get(DiagnosisHypothesisModel, "hypothesis-1") is None
 
 
 def test_completed_tool_is_not_repeated_after_user_input(

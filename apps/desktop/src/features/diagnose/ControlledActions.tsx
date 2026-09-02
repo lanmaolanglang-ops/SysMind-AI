@@ -242,7 +242,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
         <div className={`action-result action-result--${action.status}`} role="status">
           <strong>{action.status === "succeeded" ? (isTerminate ? "应用已强制终止并验证" : isProcess ? "应用已关闭并验证" : isRestore ? "启动项已恢复并验证" : "启动项已禁用并验证") : action.status === "close_pending" ? "应用未在 8 秒内关闭；尚未执行强制终止" : "操作未完成"}</strong>
           {action.error_message && <p>{action.error_message}</p>}
-          {!isProcess && !isRestore && action.status === "succeeded" && action.recovery_available && (
+          {!isProcess && !isRestore && action.recovery_available && (
             <button type="button" onClick={prepareRecovery} disabled={locked}>恢复自动启动</button>
           )}
           {isProcess && action.status === "close_pending" && (

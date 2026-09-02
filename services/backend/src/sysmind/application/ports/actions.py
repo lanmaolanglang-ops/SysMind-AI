@@ -16,6 +16,14 @@ class TargetChangedError(RuntimeError):
     """The action target no longer matches the evidence-bound revision."""
 
 
+class ActionVerificationError(RuntimeError):
+    """A mutation completed but its post-state could not be verified."""
+
+    def __init__(self, message: str, *, recovery_id: str | None = None) -> None:
+        super().__init__(message)
+        self.recovery_id = recovery_id
+
+
 class StartupActionAdapter(Protocol):
     def candidates(self) -> Sequence[StartupActionCandidate]: ...
     def disable(self, item_id: str, observed_revision: str) -> MutationResult: ...

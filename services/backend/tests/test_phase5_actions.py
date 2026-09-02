@@ -9,6 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sysmind.actions import ActionCoordinator, ActionError
+from sysmind.api.dto.actions import ActionResponse
+from sysmind.application.ports.actions import ActionVerificationError
 from sysmind.domain.actions import (
     MutationResult,
     ProcessActionCandidate,
@@ -31,6 +33,7 @@ class FakeStartupActions:
         self.item = StartupActionCandidate("a" * 64, "Example", "user_run", "example.exe", "b" * 64)
         self.enabled = True
         self.recoveries: set[str] = set()
+        self.fail_verification = False
 
     def candidates(self) -> tuple[StartupActionCandidate, ...]:
         return (self.item,) if self.enabled else ()
@@ -44,6 +47,10 @@ class FakeStartupActions:
             raise TargetChangedError("changed")
         self.enabled = False
         self.recoveries.add("recovery-1")
+        if self.fail_verification:
+            raise ActionVerificationError(
+                "Startup action could not be verified.", recovery_id="recovery-1"
+            )
         return MutationResult("recovery-1", None)
 
     def restore(self, recovery_id: str) -> MutationResult:
@@ -222,6 +229,29 @@ def test_target_revision_change_fails_closed(tmp_path: Path) -> None:
     )
     result = service.execute(action.id, ticket)
     assert result.status == "target_changed"
+
+
+def test_disable_verification_failure_keeps_recovery_chain(tmp_path: Path) -> None:
+    service, adapter = coordinator(tmp_path)
+    adapter.fail_verification = True
+    candidate = service.candidates("diagnosis-ready")[0]
+    action = service.create_disable(
+        "diagnosis-ready", candidate.item_id, candidate.observed_revision
+    )
+    _confirmed, ticket, _expires = service.confirm(action.id)
+
+    result = service.execute(action.id, ticket)
+
+    assert result.status == "verification_failed"
+    assert result.recovery_id == "recovery-1"
+    assert adapter.recovery_exists("recovery-1")
+    assert ActionResponse.from_record(result).recovery_available is True
+
+    restore = service.create_restore(result.id)
+    _confirmed, restore_ticket, _expires = service.confirm(restore.id)
+    restored = service.execute(restore.id, restore_ticket)
+    assert restored.status == "succeeded"
+    assert adapter.enabled is True
 
 
 def test_diagnosis_without_startup_evidence_is_rejected(tmp_path: Path) -> None:

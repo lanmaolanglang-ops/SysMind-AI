@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from sysmind.application.ports.actions import (
     ActionRepository,
+    ActionVerificationError,
     ProcessActionAdapter,
     StartupActionAdapter,
     TargetChangedError,
@@ -157,7 +158,7 @@ class ActionCoordinator:
 
     def create_restore(self, action_id: str) -> ActionRecord:
         original = self._required(action_id)
-        if original.status != "succeeded" or not original.recovery_id:
+        if original.status not in {"succeeded", "verification_failed"} or not original.recovery_id:
             raise ActionError("recovery_unavailable", "This action has no available recovery.")
         if not self._adapter.recovery_exists(original.recovery_id):
             raise ActionError("recovery_unavailable", "Recovery material is unavailable.")
@@ -263,6 +264,15 @@ class ActionCoordinator:
                     )
                 return self._repository.set_status(
                     action.id, status="succeeded", updated_at=_now(), recovery_id=result.recovery_id
+                )
+            except ActionVerificationError as error:
+                return self._repository.set_status(
+                    action.id,
+                    status="verification_failed",
+                    updated_at=_now(),
+                    recovery_id=error.recovery_id,
+                    error_code="verification_failed",
+                    error_message=str(error),
                 )
             except TargetChangedError as error:
                 return self._repository.set_status(

@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
-from sysmind.application.ports.actions import TargetChangedError
+from sysmind.application.ports.actions import ActionVerificationError, TargetChangedError
 from sysmind.domain.actions import MutationResult, StartupActionCandidate
 from sysmind.tools.contracts import ToolPermissionError, ToolUnavailableError
 
@@ -128,7 +128,9 @@ class WindowsStartupActionAdapter:
                 shutil.rmtree(directory, ignore_errors=True)
                 raise
         if any(item.item_id == item_id for item in self.candidates()):
-            raise ToolUnavailableError("Startup action could not be verified.")
+            raise ActionVerificationError(
+                "Startup action could not be verified.", recovery_id=recovery_id
+            )
         return MutationResult(recovery_id, None)
 
     def restore(self, recovery_id: str) -> MutationResult:
@@ -166,7 +168,7 @@ class WindowsStartupActionAdapter:
             shutil.move(str(directory / "item"), str(destination))
         restored = next((item for item in self.candidates() if item.item_id == item_id), None)
         if restored is None:
-            raise ToolUnavailableError("Startup recovery could not be verified.")
+            raise ActionVerificationError("Startup recovery could not be verified.")
         shutil.rmtree(directory)
         return MutationResult(None, restored.observed_revision)
 

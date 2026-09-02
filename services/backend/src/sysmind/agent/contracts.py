@@ -3,23 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, TypeAlias
 
+from sysmind.tools.contracts import ToolDescriptor as ToolDescriptor
+
 ProviderActionType: TypeAlias = Literal[
     "request_tool_calls", "ask_user", "propose_action", "finalize", "abort"
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class ToolDescriptor:
-    name: str
-    version: str
-    description: str
-    input_schema: dict[str, object]
-    risk_level: str
-    sensitivity: tuple[str, ...]
-
-    @property
-    def qualified_name(self) -> str:
-        return f"{self.name}@{self.version}"
 
 
 @dataclass(frozen=True, slots=True)

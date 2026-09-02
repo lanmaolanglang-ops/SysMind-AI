@@ -8,7 +8,7 @@ from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, TypeAdapter
 
-from sysmind.agent.contracts import ToolDescriptor
+from sysmind.tools.contracts import ToolDescriptor
 
 RiskLevel: TypeAlias = Literal["read_only", "network", "state_change", "destructive"]
 ConfirmationPolicy: TypeAlias = Literal["none", "each_time", "double"]

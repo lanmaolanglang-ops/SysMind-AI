@@ -269,7 +269,6 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                 raise KeyError(diagnosis_id)
             model.status = "waiting_user_input"
             model.current_step = question
-            model.progress = 5
         return _record(model)
 
     def resume_with_input(
@@ -365,13 +364,14 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                 model.confidence = hypothesis.confidence
                 model.status = hypothesis.status
                 model.updated_at = timestamp
+            obsolete = delete(DiagnosisHypothesisModel).where(
+                DiagnosisHypothesisModel.diagnosis_id == diagnosis_id
+            )
             if active_keys:
-                session.execute(
-                    delete(DiagnosisHypothesisModel).where(
-                        DiagnosisHypothesisModel.diagnosis_id == diagnosis_id,
-                        DiagnosisHypothesisModel.hypothesis_key.not_in(active_keys),
-                    )
+                obsolete = obsolete.where(
+                    DiagnosisHypothesisModel.hypothesis_key.not_in(active_keys)
                 )
+            session.execute(obsolete)
 
     def record_stop_reason(
         self,

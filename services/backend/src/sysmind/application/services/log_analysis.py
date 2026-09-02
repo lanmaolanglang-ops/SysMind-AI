@@ -140,8 +140,9 @@ class LogAnalysisCoordinator:
     ) -> None:
         failures: list[dict[str, str]] = []
         events: list[WindowsEvent] = []
-        query_spec = LOG_TOOL_SPECS[0]
-        analyze_spec = LOG_TOOL_SPECS[1]
+        specs_by_name = {spec.name: spec for spec in LOG_TOOL_SPECS}
+        query_spec = specs_by_name["log.windows_event.query"]
+        analyze_spec = specs_by_name["log.crash.analyze"]
         steps = len(channels) + 1
         self._repository.update(
             analysis_id,
@@ -161,7 +162,7 @@ class LogAnalysisCoordinator:
 
         for index, channel_value in enumerate(channels):
             if cancellation.is_set():
-                self._finish_cancelled(analysis_id, events, failures)
+                self._finish_cancelled(analysis_id, events, failures, max_events=max_events)
                 return
             channel = channel_value
             event_query = EventLogQuery(
@@ -187,11 +188,13 @@ class LogAnalysisCoordinator:
                 code, message, failure_status = _failure(error)
                 failures.append({"tool": current_step, "code": code, "message": message})
                 if failure_status == "cancelled":
-                    self._finish_cancelled(analysis_id, events, failures)
+                    self._finish_cancelled(
+                        analysis_id, events, failures, max_events=max_events
+                    )
                     return
 
         if cancellation.is_set():
-            self._finish_cancelled(analysis_id, events, failures)
+            self._finish_cancelled(analysis_id, events, failures, max_events=max_events)
             return
         typed_events = sorted(events, key=lambda item: item.timestamp, reverse=True)[:max_events]
         self._repository.update(
@@ -316,7 +319,9 @@ class LogAnalysisCoordinator:
         except asyncio.CancelledError:
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:
-                self._finish_cancelled(analysis_id, [], record.failures)
+                self._finish_cancelled(
+                    analysis_id, [], record.failures, max_events=max_events
+                )
         except TimeoutError:
             cancellation.set()
             record = self._repository.get(analysis_id)
@@ -374,8 +379,13 @@ class LogAnalysisCoordinator:
         analysis_id: str,
         events: list[WindowsEvent],
         failures: list[dict[str, str]],
+        *,
+        max_events: int,
     ) -> None:
         current = self._repository.get(analysis_id)
+        retained_events = sorted(events, key=lambda item: item.timestamp, reverse=True)[
+            :max_events
+        ]
         self._repository.update(
             analysis_id,
             status="cancelled",
@@ -383,10 +393,11 @@ class LogAnalysisCoordinator:
             current_step=None,
             finished_at=_now(),
             summary={
-                "event_count": len(events),
-                "events": [],
+                "event_count": len(retained_events),
+                "events": [asdict(item) for item in retained_events],
                 "event_groups": [],
                 "crash_groups": [],
+                "notice": "分析已取消；仅保留取消前在本地归一化并脱敏的事件。",
             },
             failures=failures,
         )

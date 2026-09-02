@@ -67,7 +67,10 @@ class ActionResponse(BaseModel):
         data = asdict(record)
         for key in ("target_id", "observed_revision", "recovery_id"):
             data.pop(key)
-        data["recovery_available"] = record.recovery_id is not None and record.status == "succeeded"
+        data["recovery_available"] = record.recovery_id is not None and record.status in {
+            "succeeded",
+            "verification_failed",
+        }
         return cls.model_validate(data)
 
 

@@ -76,6 +76,20 @@ class TimeoutEventLogProbe(FixtureEventLogProbe):
         return ()
 
 
+class PartiallySlowEventLogProbe(FixtureEventLogProbe):
+    def __init__(self) -> None:
+        super().__init__()
+        self.system_started = Event()
+
+    def query(self, query: EventLogQuery, cancel_event: Event) -> Sequence[WindowsEvent]:
+        if query.channel == "Application":
+            return super().query(query, cancel_event)
+        self.system_started.set()
+        if cancel_event.wait(2):
+            raise ToolCancelledError("cancelled")
+        return ()
+
+
 def _client(settings: Settings, probe: FixtureEventLogProbe) -> TestClient:
     repository = SqlAlchemyLogAnalysisRepository(create_session_factory(settings.database_url))
     coordinator = LogAnalysisCoordinator(repository, LogTools(probe))
@@ -240,6 +254,26 @@ def test_running_analysis_can_be_cancelled(
     assert payload["status"] == "cancelled"
 
 
+def test_cancelled_analysis_keeps_consistent_partial_event_summary(
+    settings: Settings, auth_headers: dict[str, str]
+) -> None:
+    probe = PartiallySlowEventLogProbe()
+    with _client(settings, probe) as client:
+        response = client.post(
+            "/api/v1/log-analyses",
+            headers=auth_headers,
+            json={"channels": ["Application", "System"], "max_events": 1},
+        )
+        analysis_id = response.json()["id"]
+        assert probe.system_started.wait(1)
+        client.post(f"/api/v1/log-analyses/{analysis_id}/cancel", headers=auth_headers)
+        payload = _wait_for_terminal(client, analysis_id, auth_headers)
+
+    assert payload["status"] == "cancelled"
+    assert payload["summary"]["event_count"] == 1
+    assert len(payload["summary"]["events"]) == 1
+
+
 def test_query_timeout_is_safe_and_audited(
     settings: Settings,
     auth_headers: dict[str, str],
@@ -249,8 +283,8 @@ def test_query_timeout_is_safe_and_audited(
         log_analysis_module,
         "LOG_TOOL_SPECS",
         (
-            ToolSpec("log.windows_event.query", "1.0", 0.01),
             ToolSpec("log.crash.analyze", "1.0", 1.0),
+            ToolSpec("log.windows_event.query", "1.0", 0.01),
         ),
     )
     with _client(settings, TimeoutEventLogProbe()) as client:

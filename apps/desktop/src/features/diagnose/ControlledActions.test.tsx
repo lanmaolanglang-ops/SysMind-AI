@@ -48,6 +48,36 @@ describe("ControlledActions", () => {
     expect(screen.getByRole("button", { name: "恢复自动启动" })).toBeInTheDocument();
   });
 
+  it("keeps recovery reachable when post-action verification fails", async () => {
+    const client = api();
+    vi.spyOn(client, "get").mockResolvedValue({
+      items: [{ item_id: "a".repeat(64), name: "Example", source_kind: "user_run",
+        command_name: "example.exe", observed_revision: "b".repeat(64) }],
+    });
+    vi.spyOn(client, "post").mockResolvedValue({
+      action: { ...proposed, status: "confirmed" }, ticket: "ticket", expires_at: "soon",
+    });
+    vi.spyOn(client, "postJson")
+      .mockResolvedValueOnce(proposed)
+      .mockResolvedValueOnce({
+        ...proposed,
+        status: "verification_failed",
+        recovery_available: true,
+        error_code: "verification_failed",
+        error_message: "启动项状态无法复核，恢复资料已保留。",
+      });
+    render(<ControlledActions client={client} diagnosisId="diagnosis-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "减少开机负担" }));
+    fireEvent.click(await screen.findByRole("button", { name: "查看停用方案" }));
+    expect(await screen.findByText(/不会在下次登录时自动启动/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "我已了解，确认停用" }));
+
+    expect(await screen.findByText("操作未完成")).toBeInTheDocument();
+    expect(screen.getByText(/恢复资料已保留/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "恢复自动启动" })).toBeInTheDocument();
+  });
+
   it("never escalates a pending GUI close request to forced termination", async () => {
     const client = api();
     vi.spyOn(client, "get").mockResolvedValue({

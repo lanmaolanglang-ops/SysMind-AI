@@ -15,7 +15,9 @@ type UpdateState =
   | { kind: "error"; message: string };
 
 export function UpdatePanel({
-  updaterAvailable = import.meta.env.PROD || import.meta.env.MODE === "test",
+  updaterAvailable =
+    import.meta.env.VITE_SYSMIND_UPDATER_AVAILABLE === "true" ||
+    import.meta.env.MODE === "test",
 }: {
   updaterAvailable?: boolean;
 }) {

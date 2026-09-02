@@ -2,7 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiClient, type SseEvent } from "../../services/api-client";
-import type { AgentTask, AgentTaskEventData } from "../../services/agent-tasks";
+import {
+  agentTaskReconnectDelay,
+  type AgentTask,
+  type AgentTaskEventData,
+} from "../../services/agent-tasks";
 import { AgentTaskPanel } from "./AgentTaskPanel";
 
 function client(): ApiClient {
@@ -38,6 +42,17 @@ function task(status: AgentTask["status"]): AgentTask {
 }
 
 describe("AgentTaskPanel", () => {
+  it("backs off repeated SSE reconnects with a bounded delay", () => {
+    expect([1, 2, 3, 4, 5, 6].map(agentTaskReconnectDelay)).toEqual([
+      350,
+      700,
+      1_400,
+      2_800,
+      5_000,
+      5_000,
+    ]);
+  });
+
   it("follows SSE progress and renders the deterministic terminal result", async () => {
     const api = client();
     vi.spyOn(api, "get").mockImplementation((path) => {

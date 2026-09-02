@@ -1,5 +1,11 @@
 import type { ApiClient, SseEvent } from "./api-client";
 
+const MAX_RECONNECT_DELAY_MS = 5_000;
+
+export function agentTaskReconnectDelay(failedAttempts: number): number {
+  return Math.min(350 * 2 ** Math.max(0, failedAttempts - 1), MAX_RECONNECT_DELAY_MS);
+}
+
 export type AgentTaskStatus =
   | "created"
   | "planning"

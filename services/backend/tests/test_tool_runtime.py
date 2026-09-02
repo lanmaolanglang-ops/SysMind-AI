@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 import time
 from threading import Event
 
@@ -13,6 +15,17 @@ from sysmind.tools.registry import ToolDefinition, ToolRegistry, ToolRegistryErr
 
 class EmptyInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+def test_executor_can_be_imported_without_agent_import_order_dependency() -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", "import sysmind.tools.executor"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _definition(

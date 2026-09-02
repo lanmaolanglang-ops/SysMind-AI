@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiClientError, type ApiClient, type SseEvent } from "../../services/api-client";
 import {
   cancelAgentTask,
+  agentTaskReconnectDelay,
   getAgentTask,
   getRecentAgentTasks,
   getToolCatalog,
@@ -88,6 +89,7 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
     if (!activeTaskId) return;
     const controller = new AbortController();
     const follow = async () => {
+      let failedAttempts = 0;
       while (!controller.signal.aborted) {
         try {
           await streamAgentTaskEvents(
@@ -120,12 +122,15 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
           const latest = await getAgentTask(client, activeTaskId, controller.signal);
           setTask(latest);
           setError(null);
+          failedAttempts = 0;
           if (TERMINAL.has(latest.status)) return;
         } catch (reason: unknown) {
           if (controller.signal.aborted) return;
           setError(errorCopy(reason));
+          failedAttempts += 1;
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 350));
+        const delay = agentTaskReconnectDelay(failedAttempts || 1);
+        await new Promise((resolve) => window.setTimeout(resolve, delay));
       }
     };
     void follow();

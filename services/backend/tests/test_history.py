@@ -13,8 +13,11 @@ from sysmind.core.config import Settings
 from sysmind.infrastructure.database import create_session_factory, run_migrations
 from sysmind.infrastructure.database.models import (
     ActionPlanModel,
+    AgentPlanModel,
     DataCleanupRunModel,
     Diagnosis,
+    DiagnosisStepModel,
+    DiagnosisToolCallModel,
     ScanStepEvent,
     SystemScan,
 )
@@ -127,6 +130,90 @@ def test_action_linked_diagnosis_is_protected_from_delete_and_retention(tmp_path
     assert cleanup.json()["protected_records"] == 1
     with sessions() as session:
         assert session.get(Diagnosis, "diagnosis-protected") is not None
+
+
+def test_diagnosis_delete_cascades_plan_step_and_linked_tool_call(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    run_migrations(settings.database_url)
+    sessions = create_session_factory(settings.database_url)
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        session.add(
+            Diagnosis(
+                id="diagnosis-delete",
+                status="completed",
+                user_question="local issue",
+                category="performance",
+                provider="local",
+                plan_json="[]",
+                progress=100,
+                created_at=now,
+                completed_at=now,
+                schema_version="1",
+            )
+        )
+        session.flush()
+        session.add(
+            DiagnosisToolCallModel(
+                id="tool-call-delete",
+                diagnosis_id="diagnosis-delete",
+                tool_name="system.cpu",
+                tool_version="1.0",
+                arguments_json="{}",
+                arguments_hash="a" * 64,
+                status="completed",
+                result_json='{"utilization_percent": 10}',
+                started_at=now,
+                finished_at=now,
+                duration_ms=1,
+            )
+        )
+        session.add(
+            AgentPlanModel(
+                id="plan-delete",
+                diagnosis_id="diagnosis-delete",
+                revision=1,
+                provider="local",
+                problem_category="performance",
+                confidence=0.8,
+                status="ready",
+                plan_json="{}",
+                created_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            DiagnosisStepModel(
+                id="step-delete",
+                plan_id="plan-delete",
+                diagnosis_id="diagnosis-delete",
+                sequence=1,
+                tool_name="system.cpu",
+                tool_version="1.0",
+                reason="check cpu",
+                arguments_hash="a" * 64,
+                status="completed",
+                tool_call_id="tool-call-delete",
+                created_at=now,
+            )
+        )
+
+    with TestClient(create_app(settings)) as client:
+        preview = client.get(
+            "/api/v1/history/diagnosis/diagnosis-delete/deletion-impact", headers=_headers()
+        )
+        deleted = client.post(
+            "/api/v1/history/diagnosis/diagnosis-delete/delete",
+            headers=_headers(),
+            json={"revision": preview.json()["revision"]},
+        )
+
+    assert deleted.status_code == 200
+    with sessions() as session:
+        assert session.get(Diagnosis, "diagnosis-delete") is None
+        assert session.get(DiagnosisToolCallModel, "tool-call-delete") is None
+        assert session.get(AgentPlanModel, "plan-delete") is None
+        assert session.get(DiagnosisStepModel, "step-delete") is None
 
 
 def test_baseline_uses_completed_scan_medians(tmp_path: Path) -> None:

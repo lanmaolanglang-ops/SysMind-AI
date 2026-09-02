@@ -113,7 +113,7 @@ async def submit_feedback(
 async def export_diagnosis(
     diagnosis_id: str,
     request: Request,
-    format: str = Query(pattern="^(json|markdown)$"),
+    export_format: str = Query(alias="format", pattern="^(json|markdown)$"),
 ) -> Response:
     coordinator = _coordinator(request)
 
@@ -121,7 +121,7 @@ async def export_diagnosis(
         record = coordinator.get(diagnosis_id)
         if record is None or record.report is None:
             raise LookupError(diagnosis_id)
-        if format == "markdown":
+        if export_format == "markdown":
             content, media_type, suffix = record.report_markdown or "", "text/markdown", "md"
         else:
             response = DiagnosisResponse.from_record(record, coordinator.tool_calls(diagnosis_id))

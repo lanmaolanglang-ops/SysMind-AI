@@ -140,11 +140,16 @@ No `.env` file is required. Never put real API keys in repository environment fi
 
 ```powershell
 $token = "development-session-token-change-me-0001"
-& services/backend/.venv/Scripts/python.exe -m sysmind `
-  --host 127.0.0.1 `
-  --port 0 `
-  --session-token $token `
-  --data-dir .sysmind-data
+$env:SYSMIND_SESSION_TOKEN = $token
+try {
+  & services/backend/.venv/Scripts/python.exe -m sysmind `
+    --host 127.0.0.1 `
+    --port 0 `
+    --data-dir .sysmind-data
+}
+finally {
+  Remove-Item Env:SYSMIND_SESSION_TOKEN
+}
 ```
 
 The first stdout handshake begins with `SYSMIND_ENDPOINT` and includes the randomly assigned loopback port. Call `/health` with `X-SysMind-Session`; do not paste session tokens into issue reports or logs.

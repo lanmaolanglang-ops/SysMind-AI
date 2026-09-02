@@ -368,7 +368,7 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
             <summary>查看正在检查的项目</summary>
             <ol className="diagnosis-plan" aria-label="诊断计划">
               {diagnosis.plan.map((step, index) => (
-                <li key={step.tool}>
+                <li key={`${step.tool}-${index}`}>
                   <span>{index + 1}</span>
                   <div><strong>{step.purpose}</strong></div>
                 </li>
