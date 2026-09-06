@@ -30,6 +30,7 @@ pub struct BackendSnapshot {
 struct EndpointHandshake {
     host: String,
     port: u16,
+    backend_version: Option<String>,
     api_version: String,
 }
 
@@ -198,23 +199,8 @@ impl BackendManager {
                 );
                 return;
             };
-            if handshake.host != "127.0.0.1" {
-                set_failure(
-                    &shared,
-                    generation,
-                    "Backend attempted to use a non-loopback host.".to_string(),
-                );
-                return;
-            }
-            if handshake.api_version != EXPECTED_API_VERSION {
-                set_failure(
-                    &shared,
-                    generation,
-                    format!(
-                        "API protocol mismatch: desktop expects {EXPECTED_API_VERSION}, backend reported {}.",
-                        handshake.api_version
-                    ),
-                );
+            if let Some(error) = handshake_contract_error(&handshake) {
+                set_failure(&shared, generation, error);
                 return;
             }
 
@@ -351,6 +337,25 @@ fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>, generation: u64) {
 fn parse_handshake(line: &str) -> Option<EndpointHandshake> {
     let payload = line.strip_prefix(HANDSHAKE_PREFIX)?;
     serde_json::from_str(payload).ok()
+}
+
+/// Enforces the published sidecar handshake contract
+/// (contracts/schemas/sidecar-handshake.schema.json) before any connection is trusted.
+fn handshake_contract_error(handshake: &EndpointHandshake) -> Option<String> {
+    if handshake.host != "127.0.0.1" {
+        return Some("Backend attempted to use a non-loopback host.".to_string());
+    }
+    let backend_version = handshake.backend_version.as_deref().unwrap_or_default();
+    if backend_version.trim().is_empty() {
+        return Some("Backend handshake omitted its backend version.".to_string());
+    }
+    if handshake.api_version != EXPECTED_API_VERSION {
+        return Some(format!(
+            "API protocol mismatch: desktop expects {EXPECTED_API_VERSION}, backend reported {}.",
+            handshake.api_version
+        ));
+    }
+    None
 }
 
 fn wait_until_ready(endpoint: &BackendEndpoint, timeout: Duration) -> Result<(), String> {
@@ -539,11 +544,13 @@ mod tests {
 
     #[test]
     fn parses_loopback_endpoint_handshake() {
-        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"api_version":"1.0"}"#;
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
         let handshake = parse_handshake(line).expect("valid handshake");
         assert_eq!(handshake.host, "127.0.0.1");
         assert_eq!(handshake.port, 43123);
+        assert_eq!(handshake.backend_version.as_deref(), Some("0.1.0"));
         assert_eq!(handshake.api_version, EXPECTED_API_VERSION);
+        assert!(handshake_contract_error(&handshake).is_none());
     }
 
     #[test]
@@ -553,9 +560,37 @@ mod tests {
 
     #[test]
     fn detects_protocol_mismatch() {
-        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"api_version":"2.0"}"#;
+        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"2.0"}"#;
         let handshake = parse_handshake(line).expect("valid handshake");
         assert_ne!(handshake.api_version, EXPECTED_API_VERSION);
+        assert_eq!(
+            handshake_contract_error(&handshake).as_deref(),
+            Some("API protocol mismatch: desktop expects 1.0, backend reported 2.0.")
+        );
+    }
+
+    #[test]
+    fn handshake_without_backend_version_fails_the_contract() {
+        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"api_version":"1.0"}"#;
+        let handshake = parse_handshake(line).expect("parseable handshake");
+        assert_eq!(
+            handshake_contract_error(&handshake).as_deref(),
+            Some("Backend handshake omitted its backend version.")
+        );
+
+        let blank = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"  ","api_version":"1.0"}"#;
+        let handshake = parse_handshake(blank).expect("parseable handshake");
+        assert!(handshake_contract_error(&handshake).is_some());
+    }
+
+    #[test]
+    fn non_loopback_handshake_fails_the_contract() {
+        let line = r#"SYSMIND_ENDPOINT {"host":"0.0.0.0","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        let handshake = parse_handshake(line).expect("parseable handshake");
+        assert_eq!(
+            handshake_contract_error(&handshake).as_deref(),
+            Some("Backend attempted to use a non-loopback host.")
+        );
     }
 
     #[test]

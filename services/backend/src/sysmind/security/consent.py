@@ -60,6 +60,8 @@ class ConsentService:
             payload = json.loads(base64.urlsafe_b64decode(encoded.encode()))
         except (ValueError, json.JSONDecodeError) as error:
             raise ConsentError("Consent ticket is invalid.") from error
+        if not isinstance(payload, dict):
+            raise ConsentError("Consent ticket is invalid.")
         if payload.get("action_id") != action_id or payload.get("tool") != tool_name:
             raise ConsentError("Consent ticket does not match this action.")
         if payload.get("target_hash") != hashlib.sha256(target_id.encode()).hexdigest():

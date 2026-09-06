@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 
@@ -9,8 +10,10 @@ from sysmind.agent.contracts import ProviderError, ProviderRequest
 from sysmind.agent.providers import OpenAICompatibleConfig, OpenAICompatibleProvider
 from sysmind.application.ports.secrets import SecretService
 from sysmind.application.ports.settings import ProviderSettingsRepository
+from sysmind.observability.logging import log_event
 
 _SECRET_REFERENCE = "provider.api_key"
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +113,19 @@ class ProviderSettingsService:
         except ProviderError as error:
             succeeded = False
             error_code = error.code
+        except Exception as error:
+            # An unexpected adapter failure must still land in the connection-test
+            # audit trail and degrade to the local-rules fallback, never a 500.
+            succeeded = False
+            error_code = "internal_error"
+            log_event(
+                _LOGGER,
+                logging.ERROR,
+                "Provider connection test failed unexpectedly.",
+                component="provider_settings",
+                event_type="provider_test_failed",
+                error_type=type(error).__name__,
+            )
         duration_ms = round((time.monotonic() - started) * 1000)
         self._repository.record_test(
             provider.name, "succeeded" if succeeded else "failed", error_code, duration_ms

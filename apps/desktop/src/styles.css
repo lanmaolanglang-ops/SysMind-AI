@@ -1,8 +1,16 @@
 :root {
+  /* Design tokens from .impeccable/design.json; keep values in sync with the snapshot. */
+  --text-strong: #1a241f;
+  --text-body: #526159;
+  --text-muted: #667085;
+  --panel: #fff;
+  --border: #d8dde5;
+  --muted: #5e6b62;
+  --danger: #b42318;
   font-family:
     "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
     sans-serif;
-  color: #1a241f;
+  color: var(--text-strong);
   background: #edf0eb;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -11,9 +19,9 @@
 .settings-panel,
 .history-panel,
 .panel-error {
-  border: 1px solid var(--border, #d8dde5);
+  border: 1px solid var(--border);
   border-radius: 18px;
-  background: var(--panel, #fff);
+  background: var(--panel);
   padding: 24px;
 }
 
@@ -38,7 +46,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  border-bottom: 1px solid var(--border);
 }
 
 .history-list li > small { color: var(--text-muted); }
@@ -69,13 +77,13 @@
   display: grid;
   gap: 0.55rem;
   padding: 0.9rem 0;
-  border-block: 1px solid var(--border, #d8dde5);
+  border-block: 1px solid var(--border);
 }
 
 .history-baseline span,
-.retention-settings p { color: var(--text-muted, #667085); }
+.retention-settings p { color: var(--text-muted); }
 
-.danger-action { color: var(--danger, #b42318); border-color: #dca4a0; }
+.danger-action { color: var(--danger); border-color: #dca4a0; }
 
 .retention-settings label { max-width: 10rem; }
 .retention-settings input { width: 100%; }
@@ -163,7 +171,7 @@
 
 .controlled-actions__heading p,
 .action-candidates small {
-  color: var(--muted, #5e6b62);
+  color: var(--muted);
 }
 
 .controlled-actions__buttons {
@@ -180,7 +188,7 @@
 
 .action-candidates li {
   padding: 0.8rem 0;
-  border-top: 1px solid var(--border, #d7ded8);
+  border-top: 1px solid var(--border);
 }
 
 .action-candidates div,

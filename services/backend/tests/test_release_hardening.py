@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 
@@ -10,10 +14,26 @@ from sysmind.actions import ActionError
 from sysmind.api.dto.agent_tasks import StartAgentTaskRequest
 from sysmind.observability.logging import log_event
 from sysmind.reports.redaction import redact_text
+from sysmind.security import ConsentError, ConsentService
 from sysmind.security.redaction import is_sensitive_key
 from tests.test_phase5_actions import FakeStartupActions, coordinator
 
 BACKSLASH = chr(92)
+
+
+def test_consent_verify_rejects_signed_non_object_payloads() -> None:
+    service = ConsentService("hardening-session")
+    payload = base64.urlsafe_b64encode(json.dumps(["unexpected-shape"]).encode()).decode()
+    signature = hmac.new(service._key, payload.encode(), hashlib.sha256).hexdigest()
+
+    with pytest.raises(ConsentError, match="invalid"):
+        service.verify(
+            f"{payload}.{signature}",
+            "action-1",
+            "startup.disable_current_user",
+            "t" * 64,
+            "r" * 64,
+        )
 
 
 def test_consume_confirmation_is_single_use_and_expiry_bound(tmp_path) -> None:

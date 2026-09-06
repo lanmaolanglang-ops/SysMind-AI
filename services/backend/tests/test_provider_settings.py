@@ -1,12 +1,18 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import text
 
 from sysmind.api.app import create_app
 from sysmind.application.services.provider_settings import ProviderSettingsService
 from sysmind.core.config import Settings
-from sysmind.infrastructure.database import create_session_factory, run_migrations
+from sysmind.infrastructure.database import (
+    create_database_engine,
+    create_session_factory,
+    run_migrations,
+)
 from sysmind.infrastructure.database.repositories.settings import (
     SqlAlchemyProviderSettingsRepository,
 )
@@ -64,3 +70,36 @@ def test_provider_endpoint_rejects_insecure_remote_http(tmp_path: Path) -> None:
         assert "HTTPS" in str(error)
     else:
         raise AssertionError("insecure remote endpoint was accepted")
+
+
+@pytest.mark.anyio
+async def test_provider_test_connection_maps_unexpected_errors_to_failed_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_url = f"sqlite:///{(tmp_path / 'settings.db').as_posix()}"
+    run_migrations(database_url)
+    service = ProviderSettingsService(
+        SqlAlchemyProviderSettingsRepository(create_session_factory(database_url)),
+        FakeSecretService(),
+    )
+
+    class ExplodingProvider:
+        name = "exploding"
+
+        async def complete(self, request: object) -> object:
+            raise RuntimeError("simulated adapter crash")
+
+    monkeypatch.setattr(service, "configured_provider", lambda: ExplodingProvider())
+
+    succeeded, error_code, duration_ms = await service.test_connection()
+
+    assert succeeded is False
+    assert error_code == "internal_error"
+    assert duration_ms >= 0
+    engine = create_database_engine(database_url)
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT provider, status, error_code FROM provider_connection_tests")
+        ).one()
+    engine.dispose()
+    assert row == ("exploding", "failed", "internal_error")
