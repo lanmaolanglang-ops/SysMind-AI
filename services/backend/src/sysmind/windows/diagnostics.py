@@ -6,12 +6,15 @@ import shutil
 import subprocess
 import time
 from collections.abc import Sequence
+from dataclasses import replace
 from threading import Event
 from typing import Any
 
 import psutil
 
 from sysmind.domain.diagnostics import (
+    GPU_TELEMETRY_SYSTEM_SCOPE,
+    GPU_TELEMETRY_UNAVAILABLE_OTHERS,
     Capability,
     CpuInfo,
     DiskStatus,
@@ -26,6 +29,93 @@ _GPU_COMMAND = (
     "Get-CimInstance Win32_VideoController | "
     "Select-Object Name,AdapterRAM,DriverVersion | ConvertTo-Json -Compress"
 )
+
+# Samples the WDDM GPU counters once. `-MaxSamples 1` still costs one sample
+# interval (~1s), which is why this is a separate, individually timed call rather
+# than being folded into the metadata query above.
+_GPU_TELEMETRY_COMMAND = (
+    "$s = Get-Counter -Counter '\\GPU Engine(*)\\Utilization Percentage',"
+    "'\\GPU Adapter Memory(*)\\Dedicated Usage' -MaxSamples 1 -ErrorAction Stop;"
+    "@($s.CounterSamples) | ForEach-Object {"
+    " $i = [string]$_.InstanceName;"
+    " if ($i -match 'luid_[0-9a-fA-Fx_]+_phys_[0-9]+') {"
+    "  $a = $Matches[0];"
+    "  if ($i -match 'engtype_([a-z0-9]+)') {"
+    "   [pscustomobject]@{a = ($a + '|' + $Matches[1]); t = 'e';"
+    "                    v = [math]::Round([double]$_.CookedValue, 2)}"
+    "  } elseif ([string]$_.Path -match 'dedicated usage') {"
+    "   [pscustomobject]@{a = $a; t = 'm'; v = [math]::Round([double]$_.CookedValue)}"
+    "  }"
+    " }"
+    "} | ConvertTo-Json -Compress"
+)
+
+_TELEMETRY_TIMEOUT_SECONDS = 8
+
+
+def _summarize_gpu_telemetry(
+    rows: Sequence[dict[str, Any]],
+) -> tuple[float | None, int | None] | None:
+    """Reduce raw GPU counter samples into one system-level reading.
+
+    Utilization is the busiest physical adapter (its engines summed, capped at
+    100%); memory is the dedicated VRAM in use across every adapter. The counters
+    are keyed by LUID and ``Win32_VideoController`` does not expose it, so a
+    per-adapter breakdown would be fabricated rather than measured.
+    """
+    engines: dict[str, float] = {}
+    memory_total = 0
+    saw_memory = False
+    for row in rows:
+        adapter = row.get("a")
+        if not isinstance(adapter, str):
+            continue
+        value = row.get("v")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        kind = row.get("t")
+        if kind == "e":
+            key = adapter.split("|", 1)[0]
+            engines[key] = engines.get(key, 0.0) + float(value)
+        elif kind == "m":
+            saw_memory = True
+            memory_total += int(value)
+    utilization = round(min(100.0, max(engines.values())), 1) if engines else None
+    memory = memory_total if saw_memory else None
+    if utilization is None and memory is None:
+        return None
+    return utilization, memory
+
+
+def _collect_gpu_telemetry(powershell_path: str) -> tuple[float | None, int | None] | None:
+    """Best-effort GPU telemetry; any failure simply leaves telemetry unavailable."""
+    try:
+        completed = subprocess.run(
+            [powershell_path, "-NoProfile", "-NonInteractive", "-Command", _GPU_TELEMETRY_COMMAND],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_TELEMETRY_TIMEOUT_SECONDS,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if completed.returncode != 0:
+        return None
+    raw = completed.stdout.strip()
+    if not raw:
+        return None
+    try:
+        payload: Any = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    rows = payload if isinstance(payload, list) else [payload]
+    try:
+        return _summarize_gpu_telemetry([row for row in rows if isinstance(row, dict)])
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def normalized_cpu_percent(raw_percent: float, logical_cores: int | None = None) -> float:
@@ -136,6 +226,27 @@ class WindowsSystemProbe:
                 )
         except (TypeError, ValueError, OverflowError) as error:
             raise ToolUnavailableError("Windows returned invalid GPU information.") from error
+        if results and self._powershell_path is not None:
+            telemetry = _collect_gpu_telemetry(self._powershell_path)
+            if telemetry is not None:
+                utilization, memory_used = telemetry
+                results[0] = replace(
+                    results[0],
+                    telemetry_available=True,
+                    utilization_percent=utilization,
+                    memory_used_bytes=memory_used,
+                    # The adapter was created as "telemetry unavailable"; the
+                    # placeholder reason has to go, otherwise the invariant in
+                    # GpuInfo rejects an available reading that still explains itself.
+                    telemetry_limitation=None,
+                    telemetry_scope=GPU_TELEMETRY_SYSTEM_SCOPE,
+                )
+                # The reading is system-wide, so the remaining adapters must not
+                # look like they were measured individually.
+                for index in range(1, len(results)):
+                    results[index] = replace(
+                        results[index], telemetry_limitation=GPU_TELEMETRY_UNAVAILABLE_OTHERS
+                    )
         return tuple(results)
 
     def memory(self) -> MemoryStatus:

@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
+from functools import partial
 from threading import Event
 from typing import Literal
 
@@ -26,9 +27,43 @@ _LOGGER = logging.getLogger(__name__)
 # event-log trail, which always stores an arguments hash.
 NO_ARGUMENTS_HASH = arguments_hash({})
 
+# A crash used to leave a scan stranded as "interrupted" until the user started a
+# new one. These bounds keep the automatic retry from becoming a surprise: only
+# scans young enough to still describe the current machine are replayed, and only
+# a small number per startup so a backlog cannot flood the machine on launch.
+REPLAY_WINDOW_SECONDS = 900
+MAX_REPLAYS_PER_STARTUP = 2
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _started_within_replay_window(record: ScanRecord) -> bool:
+    try:
+        started = datetime.fromisoformat(record.started_at)
+    except ValueError:
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - started).total_seconds() <= REPLAY_WINDOW_SECONDS
+
+
+def _interrupted_by_restart(record: ScanRecord) -> bool:
+    # `mark_interrupted` records the restart as a normal failure carrying this
+    # code, so it is the only reliable way to tell "the backend died mid-scan"
+    # from a scan that genuinely failed.
+    return record.status == "failed" and any(
+        failure.get("code") == "backend_restarted" for failure in record.failures
+    )
+
+
+def _discard_task(
+    tasks: dict[str, asyncio.Task[None]],
+    scan_id: str,
+    _task: asyncio.Task[None],
+) -> None:
+    tasks.pop(scan_id, None)
 
 
 def _serialize(value: object) -> object:
@@ -91,7 +126,50 @@ class QuickScanCoordinator:
         return self._repository.recent(limit)
 
     def recover_interrupted(self) -> int:
-        return self._repository.mark_interrupted(_now())
+        interrupted = self._repository.mark_interrupted(_now())
+        if interrupted:
+            self._replay_recently_interrupted()
+        return interrupted
+
+    def _replay_recently_interrupted(self) -> int:
+        """Re-run scans a crash cut short instead of leaving them for the user.
+
+        Only scans started inside REPLAY_WINDOW_SECONDS qualify. An older
+        "running" row describes a machine state that has since moved on, and
+        replaying it would present stale evidence as if it were current.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # Startup outside an event loop (tests, CLI) cannot schedule a replay.
+            return 0
+        candidates = [
+            record
+            for record in self._repository.recent(MAX_REPLAYS_PER_STARTUP * 5)
+            if _interrupted_by_restart(record) and _started_within_replay_window(record)
+        ]
+        replayed = 0
+        for record in candidates[:MAX_REPLAYS_PER_STARTUP]:
+            cancellation = Event()
+            self._cancellations[record.id] = cancellation
+            task = asyncio.create_task(
+                self._run_guarded(record.id, cancellation, None),
+                name=f"quick-scan-replay-{record.id}",
+            )
+            self._tasks[record.id] = task
+            # partial() binds the id now; a lambda in this loop would capture the
+            # last record and pop the wrong entry when the task finishes.
+            task.add_done_callback(partial(_discard_task, self._tasks, record.id))
+            replayed += 1
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Quick scan replayed after an interrupted run.",
+                component="quick_scan",
+                event_type="scan_replayed",
+                scan_id=record.id,
+            )
+        return replayed
 
     def cancel(self, scan_id: str) -> ScanRecord | None:
         record = self._repository.get(scan_id)

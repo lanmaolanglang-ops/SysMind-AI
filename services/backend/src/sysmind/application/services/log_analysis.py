@@ -9,7 +9,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
+from functools import partial
 from threading import Event
+from typing import cast, get_args
 
 from sysmind.application.ports.log_analyses import LogAnalysisRepository
 from sysmind.domain.diagnostics import StepStatus
@@ -36,6 +38,76 @@ _LOGGER = logging.getLogger(__name__)
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# Kept in step with QuickScanCoordinator: a crash used to strand a running
+# analysis until the user started a new one. Only recently started work is
+# replayed, and only a little of it, so a backlog cannot flood the machine.
+REPLAY_WINDOW_SECONDS = 900
+MAX_REPLAYS_PER_STARTUP = 2
+
+# A replay reads the request back out of storage, so it must be re-validated
+# against the same allowlists the API enforces rather than trusted as-is.
+_ALLOWED_CHANNEL_NAMES = frozenset(get_args(LogChannel))
+_ALLOWED_LEVEL_NAMES = frozenset(get_args(EventLevel))
+
+
+def _started_within_replay_window(record: LogAnalysisRecord) -> bool:
+    try:
+        started = datetime.fromisoformat(record.started_at)
+    except ValueError:
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - started).total_seconds() <= REPLAY_WINDOW_SECONDS
+
+
+def _interrupted_by_restart(record: LogAnalysisRecord) -> bool:
+    return record.status == "failed" and any(
+        failure.get("code") == "backend_restarted" for failure in record.failures
+    )
+
+
+def _discard_task(
+    tasks: dict[str, asyncio.Task[None]],
+    analysis_id: str,
+    _task: asyncio.Task[None],
+) -> None:
+    tasks.pop(analysis_id, None)
+
+
+def _replay_parameters(
+    query: dict[str, object],
+) -> tuple[tuple[LogChannel, ...], int, tuple[EventLevel, ...], tuple[int, ...], int] | None:
+    """Rebuild the original request from the stored query, or refuse to guess."""
+    channels = query.get("channels")
+    lookback_hours = query.get("lookback_hours")
+    levels = query.get("levels")
+    event_ids = query.get("event_ids")
+    max_events = query.get("max_events")
+    if not isinstance(channels, list) or not channels:
+        return None
+    if not isinstance(levels, list) or not levels:
+        return None
+    if not isinstance(event_ids, list):
+        return None
+    if not isinstance(lookback_hours, int) or not 1 <= lookback_hours <= 168:
+        return None
+    if not isinstance(max_events, int) or not 1 <= max_events <= 200:
+        return None
+    if not all(item in _ALLOWED_CHANNEL_NAMES for item in channels):
+        return None
+    if not all(item in _ALLOWED_LEVEL_NAMES for item in levels):
+        return None
+    if not all(isinstance(item, int) and not isinstance(item, bool) for item in event_ids):
+        return None
+    return (
+        cast("tuple[LogChannel, ...]", tuple(str(item) for item in channels)),
+        lookback_hours,
+        cast("tuple[EventLevel, ...]", tuple(str(item) for item in levels)),
+        tuple(int(item) for item in event_ids),
+        max_events,
+    )
 
 
 def _arguments_hash(arguments: dict[str, object]) -> str:
@@ -113,7 +185,58 @@ class LogAnalysisCoordinator:
         return self._repository.recent(limit)
 
     def recover_interrupted(self) -> int:
-        return self._repository.mark_interrupted(_now())
+        interrupted = self._repository.mark_interrupted(_now())
+        if interrupted:
+            self._replay_recently_interrupted()
+        return interrupted
+
+    def _replay_recently_interrupted(self) -> int:
+        """Re-run analyses a crash cut short instead of leaving them for the user."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return 0
+        replayed = 0
+        for record in self._repository.recent(MAX_REPLAYS_PER_STARTUP * 5):
+            if replayed >= MAX_REPLAYS_PER_STARTUP:
+                break
+            if not _interrupted_by_restart(record):
+                continue
+            if not _started_within_replay_window(record):
+                continue
+            parameters = _replay_parameters(record.query)
+            if parameters is None:
+                continue
+            channels, lookback_hours, levels, event_ids, max_events = parameters
+            cancellation = Event()
+            self._cancellations[record.id] = cancellation
+            task = asyncio.create_task(
+                self._run_guarded(
+                    record.id,
+                    channels,
+                    lookback_hours,
+                    levels,
+                    event_ids,
+                    max_events,
+                    cancellation,
+                    None,
+                ),
+                name=f"log-analysis-replay-{record.id}",
+            )
+            self._tasks[record.id] = task
+            # partial() binds the id now; a lambda here would capture the last
+            # record in the loop and pop the wrong entry.
+            task.add_done_callback(partial(_discard_task, self._tasks, record.id))
+            replayed += 1
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Log analysis replayed after an interrupted run.",
+                component="log_analysis",
+                event_type="analysis_replayed",
+                analysis_id=record.id,
+            )
+        return replayed
 
     def cancel(self, analysis_id: str) -> LogAnalysisRecord | None:
         record = self._repository.get(analysis_id)

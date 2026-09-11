@@ -30,6 +30,13 @@ class CpuInfo:
 
 # Neutral, adapter-agnostic copy shown whenever real-time GPU telemetry is unavailable.
 GPU_TELEMETRY_UNAVAILABLE = "Real-time GPU utilization is unavailable."
+# WDDM counters expose a per-adapter LUID, and Win32_VideoController does not, so the
+# readings cannot be attributed to a named adapter on multi-GPU systems.
+GPU_TELEMETRY_SYSTEM_SCOPE = "system"
+GPU_TELEMETRY_ADAPTER_SCOPE = "adapter"
+GPU_TELEMETRY_UNAVAILABLE_OTHERS = (
+    "GPU telemetry is reported at system level and attached to the first adapter."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +48,7 @@ class GpuInfo:
     utilization_percent: float | None = None
     memory_used_bytes: int | None = None
     telemetry_limitation: str | None = None
+    telemetry_scope: str = GPU_TELEMETRY_ADAPTER_SCOPE
 
     def __post_init__(self) -> None:
         if self.telemetry_available:

@@ -317,3 +317,23 @@ def test_windows_event_log_adapter_smoke() -> None:
 
     assert len(events) <= 5
     assert all(event.channel == "Application" for event in events)
+
+
+def test_replay_parameters_are_revalidated_against_the_allowlists() -> None:
+    from sysmind.application.services.log_analysis import _replay_parameters
+
+    valid = {
+        "channels": ["Application"],
+        "lookback_hours": 24,
+        "levels": ["error"],
+        "event_ids": [1000],
+        "max_events": 50,
+    }
+    assert _replay_parameters(valid) == (("Application",), 24, ("error",), (1000,), 50)
+
+    assert _replay_parameters({**valid, "channels": ["Security"]}) is None
+    assert _replay_parameters({**valid, "levels": ["verbose"]}) is None
+    assert _replay_parameters({**valid, "lookback_hours": 500}) is None
+    assert _replay_parameters({**valid, "max_events": 0}) is None
+    assert _replay_parameters({**valid, "channels": []}) is None
+    assert _replay_parameters({}) is None
