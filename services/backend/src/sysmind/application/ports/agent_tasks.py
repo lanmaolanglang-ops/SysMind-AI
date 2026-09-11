@@ -68,7 +68,8 @@ class AgentTaskRepository(Protocol):
         provider_call_id: str,
         tool_name: str,
         tool_version: str,
-        arguments: dict[str, object],
+        # Already redacted for audit: raw tool arguments must never reach the repository.
+        redacted_arguments: dict[str, object],
         arguments_hash: str,
         risk_level: str,
         started_at: str,

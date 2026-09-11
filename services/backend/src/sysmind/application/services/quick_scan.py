@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from threading import Event
@@ -13,11 +14,17 @@ from sysmind.application.ports.scans import ScanRepository
 from sysmind.domain.diagnostics import ScanRecord, StepStatus
 from sysmind.observability.logging import log_event
 from sysmind.tools.contracts import ToolCancelledError, ToolSpec, ToolUnavailableError
+from sysmind.tools.executor import arguments_hash
 from sysmind.tools.process import PROCESS_TOOL_SPECS, ProcessTools
 from sysmind.tools.system import SYSTEM_TOOL_SPECS, SystemTools
 
 SCAN_SCHEMA_VERSION = "1.0"
 _LOGGER = logging.getLogger(__name__)
+
+# Quick-scan probes are invoked with no parameters, so their normalized parameter hash is
+# the hash of an empty mapping. Recording it keeps the scan audit trail aligned with the
+# event-log trail, which always stores an arguments hash.
+NO_ARGUMENTS_HASH = arguments_hash({})
 
 
 def _now() -> str:
@@ -272,7 +279,7 @@ class QuickScanCoordinator:
         self,
         scan_id: str,
         summary: dict[str, object],
-        failures: list[dict[str, str]],
+        failures: Sequence[dict[str, str]],
     ) -> None:
         current = self._repository.get(scan_id)
         self._repository.update(
@@ -303,6 +310,7 @@ class QuickScanCoordinator:
             scan_id=scan_id,
             tool_name=spec.name,
             tool_version=spec.version,
+            arguments_hash=NO_ARGUMENTS_HASH,
             status=status,
             started_at=started_at,
             finished_at=finished_at,

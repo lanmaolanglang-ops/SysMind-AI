@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from sysmind.application.ports.scans import ScanRepository
 from sysmind.domain.diagnostics import ScanRecord, ScanStatus, StepStatus
 from sysmind.infrastructure.database.models import ScanStepEvent, SystemScan
 
@@ -20,7 +22,7 @@ def _to_record(model: SystemScan) -> ScanRecord:
         dict[str, object] | None,
         json.loads(model.summary_json) if model.summary_json else None,
     )
-    failures = cast(list[dict[str, str]], json.loads(model.failures_json))
+    failures = tuple(cast(list[dict[str, str]], json.loads(model.failures_json)))
     return ScanRecord(
         id=model.id,
         status=cast(ScanStatus, model.status),
@@ -34,7 +36,7 @@ def _to_record(model: SystemScan) -> ScanRecord:
     )
 
 
-class SqlAlchemyScanRepository:
+class SqlAlchemyScanRepository(ScanRepository):
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
 
@@ -61,7 +63,7 @@ class SqlAlchemyScanRepository:
         current_step: str | None,
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
-        failures: list[dict[str, str]] | None = None,
+        failures: Sequence[dict[str, str]] | None = None,
     ) -> ScanRecord:
         with self._sessions.begin() as session:
             model = session.get(SystemScan, scan_id)
@@ -74,7 +76,7 @@ class SqlAlchemyScanRepository:
             if summary is not None:
                 model.summary_json = json.dumps(summary, ensure_ascii=False)
             if failures is not None:
-                model.failures_json = json.dumps(failures, ensure_ascii=False)
+                model.failures_json = json.dumps(list(failures), ensure_ascii=False)
         return _to_record(model)
 
     def add_step_event(
@@ -83,6 +85,7 @@ class SqlAlchemyScanRepository:
         scan_id: str,
         tool_name: str,
         tool_version: str,
+        arguments_hash: str,
         status: StepStatus,
         started_at: str,
         finished_at: str,
@@ -97,6 +100,7 @@ class SqlAlchemyScanRepository:
                     scan_id=scan_id,
                     tool_name=tool_name,
                     tool_version=tool_version,
+                    arguments_hash=arguments_hash,
                     status=status,
                     started_at=datetime.fromisoformat(started_at),
                     finished_at=datetime.fromisoformat(finished_at),

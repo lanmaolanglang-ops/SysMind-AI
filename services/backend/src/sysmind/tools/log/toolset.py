@@ -7,9 +7,12 @@ from sysmind.application.ports.event_logs import EventLogProbe
 from sysmind.domain.event_logs import CrashGroup, EventGroup, EventLogQuery, WindowsEvent
 from sysmind.tools.contracts import ToolSpec
 
+# Timeouts must match the ToolDefinitions registered in tools/runtime_tools.py; a
+# mismatched value here would make scheduling/monitoring judge the tool against the wrong
+# limit. Keep both in step when either changes.
 LOG_TOOL_SPECS = (
     ToolSpec("log.windows_event.query", "1.0", 12.0),
-    ToolSpec("log.crash.analyze", "1.0", 3.0),
+    ToolSpec("log.crash.analyze", "1.0", 12.0),
 )
 
 
@@ -67,6 +70,14 @@ def aggregate_events(events: Sequence[WindowsEvent]) -> tuple[EventGroup, ...]:
 
 
 class LogTools:
+    """Bounded event-log collectors/aggregators used by the log-analysis coordinator.
+
+    ``query``/``analyze``/``aggregate`` are called directly (serially, with bounded,
+    first-party arguments) and therefore skip the Tool Registry's authorization, schema
+    validation, timeout and error-normalization layers. They must not be invoked from
+    model output; model-originated calls must go through the registry/executor path.
+    """
+
     def __init__(self, probe: EventLogProbe) -> None:
         self._probe = probe
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 SENSITIVE_KEYS = frozenset(
     {
@@ -52,6 +53,39 @@ _EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 def is_sensitive_key(value: object) -> bool:
     normalized = str(value).strip().casefold()
     return normalized in SENSITIVE_KEYS or normalized.replace("-", "_") in SENSITIVE_KEYS
+
+
+# Argument keys that carry an executable command line or shell/script payload. Values under
+# these keys are always replaced in the audit trail, whatever the exact spelling.
+COMMAND_ARGUMENT_KEYS = frozenset(
+    {
+        "cmd",
+        "command",
+        "command_line",
+        "commandline",
+        "executable",
+        "executable_path",
+        "powershell",
+        "script",
+        "script_path",
+        "shell",
+    }
+)
+
+
+def redact_arguments(arguments: Mapping[str, object]) -> dict[str, object]:
+    """Return a copy of tool arguments safe to persist in the audit trail.
+
+    Secret-looking keys (via :func:`is_sensitive_key`) and command/shell payloads are
+    replaced with a placeholder. Callers must pass the result — never the raw arguments —
+    to any repository or log sink.
+    """
+    return {
+        key: "[REDACTED]"
+        if is_sensitive_key(key) or key.casefold().replace("-", "_") in COMMAND_ARGUMENT_KEYS
+        else value
+        for key, value in arguments.items()
+    }
 
 
 def redact_text(value: str) -> str:

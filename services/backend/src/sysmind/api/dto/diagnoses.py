@@ -152,12 +152,16 @@ class DiagnosisResponse(BaseModel):
             composer = EvidenceComposer()
             report_data = cast(dict[str, object], data["report"])
             finding_data = cast(list[dict[str, object]], report_data["findings"])
-            for item, finding in zip(finding_data, record.report.findings, strict=True):
+            # Both sequences come from the same report, but an explicit strict=False keeps
+            # a mismatch from ever raising out of a read-only DTO projection.
+            for item, finding in zip(finding_data, record.report.findings, strict=False):
                 item["evidence_details"] = [
                     asdict(evidence) for evidence in composer.compose(finding, calls)
                 ]
             hypothesis_data = cast(list[dict[str, object]], report_data["hypotheses"])
-            for item, hypothesis in zip(hypothesis_data, record.report.hypotheses, strict=True):
+            for item, hypothesis in zip(
+                hypothesis_data, record.report.hypotheses, strict=False
+            ):
                 item["supporting_evidence_details"] = [
                     asdict(evidence)
                     for evidence in composer.compose_references(

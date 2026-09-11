@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from sysmind.agent.contracts import (
     AgentProvider,
     ProviderAction,
+    ProviderName,
     ProviderRequest,
     ProviderResponse,
 )
@@ -28,7 +29,7 @@ class FakeProvider(AgentProvider):
         self.requests: list[ProviderRequest] = []
 
     @property
-    def name(self) -> str:
+    def name(self) -> ProviderName:
         return "fake"
 
     async def complete(self, request: ProviderRequest) -> ProviderResponse:

@@ -66,8 +66,13 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastEventId = useRef<string | undefined>(undefined);
+  const activeTaskIdRef = useRef<string | null>(null);
   const active = task !== null && !TERMINAL.has(task.status);
   const activeTaskId = active ? task.id : null;
+
+  useEffect(() => {
+    activeTaskIdRef.current = activeTaskId;
+  }, [activeTaskId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -87,6 +92,7 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
 
   useEffect(() => {
     if (!activeTaskId) return;
+    const expectedTaskId = activeTaskId;
     const controller = new AbortController();
     const follow = async () => {
       let failedAttempts = 0;
@@ -96,6 +102,9 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
             client,
             activeTaskId,
             (event) => {
+              // A stream that belonged to a previous task can deliver one last event
+              // just before it is aborted; never merge it into the active task's state.
+              if (expectedTaskId !== activeTaskIdRef.current) return;
               if (event.id) lastEventId.current = event.id;
               setEvents((current) => {
                 if (event.id && current.some((item) => item.id === event.id)) return current;
@@ -103,7 +112,7 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
               });
               if (event.data.status || event.data.progress !== undefined) {
                 setTask((current) =>
-                  current
+                  current && current.id === expectedTaskId
                     ? {
                         ...current,
                         ...(event.data.status ? { status: event.data.status } : {}),
@@ -120,6 +129,7 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
           );
           if (controller.signal.aborted) return;
           const latest = await getAgentTask(client, activeTaskId, controller.signal);
+          if (expectedTaskId !== activeTaskIdRef.current) return;
           setTask(latest);
           setError(null);
           failedAttempts = 0;

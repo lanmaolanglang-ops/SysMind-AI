@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import cast
+from typing import Annotated, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
 from starlette.concurrency import run_in_threadpool
 
 from sysmind.api.dto.diagnoses import (
@@ -18,6 +18,10 @@ from sysmind.diagnosis import DiagnosisCoordinator
 from sysmind.reports.redaction import redact_text
 
 router = APIRouter(prefix="/api/v1/diagnoses", tags=["diagnoses"])
+
+# Diagnosis ids are opaque strings, but they are echoed into a Content-Disposition header,
+# so the parameter is restricted to a conservative, header-safe alphabet and bounded length.
+DiagnosisId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")]
 
 
 def _coordinator(request: Request) -> DiagnosisCoordinator:
@@ -72,7 +76,7 @@ async def recent_diagnoses(request: Request) -> DiagnosisListResponse:
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def continue_diagnosis(
-    diagnosis_id: str, payload: ContinueDiagnosisRequest, request: Request
+    diagnosis_id: DiagnosisId, payload: ContinueDiagnosisRequest, request: Request
 ) -> DiagnosisResponse:
     coordinator = _coordinator(request)
     if await run_in_threadpool(coordinator.get, diagnosis_id) is None:
@@ -84,12 +88,12 @@ async def continue_diagnosis(
 
 
 @router.get("/{diagnosis_id}", response_model=DiagnosisResponse)
-async def get_diagnosis(diagnosis_id: str, request: Request) -> DiagnosisResponse:
+async def get_diagnosis(diagnosis_id: DiagnosisId, request: Request) -> DiagnosisResponse:
     return await _threadpool_response(_coordinator(request), diagnosis_id)
 
 
 @router.post("/{diagnosis_id}/cancel", response_model=DiagnosisResponse)
-async def cancel_diagnosis(diagnosis_id: str, request: Request) -> DiagnosisResponse:
+async def cancel_diagnosis(diagnosis_id: DiagnosisId, request: Request) -> DiagnosisResponse:
     coordinator = _coordinator(request)
     if await run_in_threadpool(coordinator.cancel, diagnosis_id) is None:
         raise HTTPException(status_code=404, detail="Diagnosis not found.")
@@ -98,7 +102,7 @@ async def cancel_diagnosis(diagnosis_id: str, request: Request) -> DiagnosisResp
 
 @router.post("/{diagnosis_id}/feedback", response_model=FeedbackAccepted)
 async def submit_feedback(
-    diagnosis_id: str, payload: DiagnosisFeedbackRequest, request: Request
+    diagnosis_id: DiagnosisId, payload: DiagnosisFeedbackRequest, request: Request
 ) -> FeedbackAccepted:
     coordinator = _coordinator(request)
     if await run_in_threadpool(coordinator.get, diagnosis_id) is None:
@@ -111,7 +115,7 @@ async def submit_feedback(
 
 @router.get("/{diagnosis_id}/export")
 async def export_diagnosis(
-    diagnosis_id: str,
+    diagnosis_id: DiagnosisId,
     request: Request,
     export_format: str = Query(alias="format", pattern="^(json|markdown)$"),
 ) -> Response:

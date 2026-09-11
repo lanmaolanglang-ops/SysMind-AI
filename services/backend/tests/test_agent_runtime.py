@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sysmind.agent.contracts import (
     AgentProvider,
     ProviderAction,
+    ProviderName,
     ProviderRateLimitError,
     ProviderRequest,
     ProviderResponse,
@@ -294,16 +295,25 @@ def test_sse_reconnect_uses_event_cursor(settings: Settings, auth_headers: dict[
     with _client(settings, provider) as client:
         response = client.post("/api/v1/tasks", headers=auth_headers, json={"user_goal": "sse"})
         payload = _wait_terminal(client, response.json()["id"], auth_headers)
+        def ids(body: str) -> list[int]:
+            # Parse the cursor the same way on both reads. Embedding "\n" in the
+            # expected strings tied the test to one line-ending convention.
+            return [
+                int(line.removeprefix("id: ").strip())
+                for line in body.splitlines()
+                if line.startswith("id: ")
+            ]
+
         stream = client.get(f"/api/v1/tasks/{payload['id']}/events", headers=auth_headers)
-        lines = stream.text.splitlines()
-        event_ids = [int(line.removeprefix("id: ")) for line in lines if line.startswith("id: ")]
+        event_ids = ids(stream.text)
         assert event_ids == sorted(event_ids)
         assert "event: task.completed" in stream.text
 
         reconnect_headers = {**auth_headers, "Last-Event-ID": str(event_ids[0])}
         reconnect = client.get(f"/api/v1/tasks/{payload['id']}/events", headers=reconnect_headers)
-        assert f"id: {event_ids[0]}\n" not in reconnect.text
-        assert f"id: {event_ids[-1]}\n" in reconnect.text
+        replayed = ids(reconnect.text)
+        assert event_ids[0] not in replayed
+        assert event_ids[-1] in replayed
 
 
 def test_startup_marks_active_agent_task_interrupted_without_replay(
@@ -373,8 +383,8 @@ async def test_task_manager_enforces_global_concurrency(settings: Settings) -> N
             self.max_active = 0
 
         @property
-        def name(self) -> str:
-            return "tracking_fake"
+        def name(self) -> ProviderName:
+            return "fake"
 
         async def complete(self, request: ProviderRequest) -> ProviderResponse:
             self.active += 1
@@ -408,6 +418,9 @@ async def test_task_manager_enforces_global_concurrency(settings: Settings) -> N
 
 @pytest.mark.anyio
 async def test_runtime_process_snapshot_propagates_cancellation() -> None:
+    cancellation = Event()
+    cancellation.set()
+
     class CancelAwareProcessProbe:
         def snapshot(self, limit: int = 200, cancel_event: Event | None = None) -> object:
             assert limit == 25
@@ -417,8 +430,6 @@ async def test_runtime_process_snapshot_propagates_cancellation() -> None:
             raise AssertionError("expected a pre-cancelled event")
 
     registry = build_runtime_registry(object(), CancelAwareProcessProbe(), object())  # type: ignore[arg-type]
-    cancellation = Event()
-    cancellation.set()
     result = await ToolExecutor(ToolPolicy(registry)).execute(
         name="process.snapshot",
         version="1.0",

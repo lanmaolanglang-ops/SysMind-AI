@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from sysmind.domain.diagnostics import ScanRecord, ScanStatus, StepStatus
@@ -17,7 +18,7 @@ class ScanRepository(Protocol):
         current_step: str | None,
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
-        failures: list[dict[str, str]] | None = None,
+        failures: Sequence[dict[str, str]] | None = None,
     ) -> ScanRecord: ...
 
     def add_step_event(
@@ -26,6 +27,7 @@ class ScanRepository(Protocol):
         scan_id: str,
         tool_name: str,
         tool_version: str,
+        arguments_hash: str,
         status: StepStatus,
         started_at: str,
         finished_at: str,

@@ -58,7 +58,9 @@ def main() -> None:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         try:
-            assert process.stdout is not None
+            # Not an `assert`: this is a runtime precondition that must survive `python -O`.
+            if process.stdout is None:
+                raise RuntimeError("Packaged backend stdout pipe was not available.")
             line_queue: queue.Queue[str] = queue.Queue(maxsize=1)
             threading.Thread(target=read_line, args=(process.stdout, line_queue), daemon=True).start()
             try:

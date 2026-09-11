@@ -87,16 +87,23 @@ class WindowsSystemProbe:
     def gpus(self) -> Sequence[GpuInfo]:
         if self._powershell_path is None:
             raise ToolUnavailableError("GPU collection requires Windows PowerShell.")
-        completed = subprocess.run(
-            [self._powershell_path, "-NoProfile", "-NonInteractive", "-Command", _GPU_COMMAND],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=6,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        try:
+            completed = subprocess.run(
+                [self._powershell_path, "-NoProfile", "-NonInteractive", "-Command", _GPU_COMMAND],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=6,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired as error:
+            # Translate the raw timeout into the adapter's own error so it is reported as
+            # "GPU collection timed out" rather than an opaque internal error.
+            raise ToolUnavailableError("GPU collection timed out.") from error
+        except OSError as error:
+            raise ToolUnavailableError("GPU collection could not be started.") from error
         if completed.returncode != 0:
             raise ToolUnavailableError("Windows did not return GPU information.")
         raw = completed.stdout.strip()

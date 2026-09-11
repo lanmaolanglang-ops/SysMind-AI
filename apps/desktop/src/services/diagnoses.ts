@@ -128,16 +128,10 @@ export function submitDiagnosisFeedback(client: ApiClient, id: string, helpful: 
   );
 }
 
-export async function downloadDiagnosis(
+export function fetchDiagnosisExport(
   client: ApiClient,
   id: string,
   format: "json" | "markdown",
-) {
-  const blob = await client.download(`/api/v1/diagnoses/${id}/export?format=${format}`);
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `sysmind-report-${id}.${format === "markdown" ? "md" : "json"}`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+): Promise<Blob> {
+  return client.download(`/api/v1/diagnoses/${id}/export?format=${format}`);
 }

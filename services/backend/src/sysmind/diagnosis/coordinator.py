@@ -32,6 +32,7 @@ from sysmind.domain.diagnosis import (
 from sysmind.prompts.report_explainer import LocalReportExplainer, ReportExplainer
 from sysmind.reports import compose_report, render_markdown
 from sysmind.reports.evidence import evidence_path_exists
+from sysmind.security.redaction import redact_arguments
 from sysmind.tools.executor import ToolExecutor, arguments_hash
 from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolRegistry
@@ -494,11 +495,12 @@ class DiagnosisCoordinator:
             "budget_exceeded": "诊断达到安全预算，已使用现有证据生成报告。",
             "user_cancelled": "诊断已由用户取消。",
             "risk_limit_reached": "诊断因安全限制停止。",
+            "backend_restarted": "本地服务重启，诊断已中断。",
         }
         self._repository.record_stop_reason(
             record.id,
             reason=stop_reason,
-            detail=stop_details[stop_reason],
+            detail=stop_details.get(stop_reason, "诊断已停止。"),
             terminal_status=final_status,
             created_at=_now(),
         )
@@ -652,7 +654,8 @@ class DiagnosisCoordinator:
                 diagnosis_id=diagnosis_id,
                 tool_name=name,
                 tool_version=version,
-                arguments=step.arguments,
+                # Only the redacted copy is persisted; raw arguments never reach storage.
+                redacted_arguments=redact_arguments(step.arguments),
                 arguments_hash=arguments_hash(step.arguments),
                 started_at=_now(),
             )

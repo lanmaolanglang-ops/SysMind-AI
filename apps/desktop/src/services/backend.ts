@@ -45,6 +45,21 @@ export async function restartBackendLauncher(): Promise<void> {
   await invoke<BackendSnapshot>("restart_backend");
 }
 
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => resolve();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+  });
+}
+
 async function waitForEndpoint(signal?: AbortSignal): Promise<BackendEndpoint> {
   const deadline = Date.now() + 12_000;
 
@@ -71,7 +86,8 @@ async function waitForEndpoint(signal?: AbortSignal): Promise<BackendEndpoint> {
       );
     }
 
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+    // Abort-aware wait so unmounting a component cancels the pending poll immediately.
+    await delay(150, signal);
   }
 
   throw new BackendConnectionError(

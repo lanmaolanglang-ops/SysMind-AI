@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import time
-from dataclasses import asdict
 from threading import Event
 
 import pytest
@@ -23,6 +20,7 @@ from sysmind.domain.diagnosis import DiagnosisToolCall
 from sysmind.infrastructure.database import create_database_engine, create_session_factory
 from sysmind.infrastructure.database.repositories import SqlAlchemyDiagnosisRepository
 from sysmind.prompts import LocalReportExplainer, ProviderReportExplainer
+from sysmind.prompts.report_explainer import provider_request_hash
 from sysmind.tools.executor import ToolExecutor
 from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolDefinition, ToolRegistry
@@ -515,15 +513,8 @@ def test_provider_synthesis_is_audited(settings: Settings, auth_headers: dict[st
     engine.dispose()
     assert row.provider == "fake"
     assert row.status == "completed"
-    expected_hash = hashlib.sha256(
-        json.dumps(
-            asdict(provider.requests[0]),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    assert row.request_hash == expected_hash
+    # Assert against the production hashing rule instead of duplicating its recipe.
+    assert row.request_hash == provider_request_hash(provider.requests[0])
     assert len(row.response_hash) == 64
 
 
@@ -553,15 +544,8 @@ def test_provider_failure_degrades_to_local_report(
             {"id": created["id"]},
         ).one()
     engine.dispose()
-    expected_hash = hashlib.sha256(
-        json.dumps(
-            asdict(provider.requests[0]),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    assert row.request_hash == expected_hash
+    # Assert against the production hashing rule instead of duplicating its recipe.
+    assert row.request_hash == provider_request_hash(provider.requests[0])
 
 
 def _network_findings(result: dict[str, object]) -> dict[str, object]:

@@ -45,6 +45,7 @@ class ActionRepository(Protocol):
         action_id: str,
         diagnosis_id: str,
         tool_name: str,
+        tool_version: str,
         target: ActionCandidate,
         created_at: str,
     ) -> ActionRecord: ...

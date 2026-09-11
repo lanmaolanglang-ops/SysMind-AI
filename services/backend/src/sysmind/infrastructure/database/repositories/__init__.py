@@ -1,4 +1,7 @@
 from sysmind.infrastructure.database.repositories.actions import SqlAlchemyActionRepository
+from sysmind.infrastructure.database.repositories.agent_tasks import (
+    SqlAlchemyAgentTaskRepository,
+)
 from sysmind.infrastructure.database.repositories.diagnoses import SqlAlchemyDiagnosisRepository
 from sysmind.infrastructure.database.repositories.history import SqlAlchemyHistoryRepository
 from sysmind.infrastructure.database.repositories.log_analyses import (
@@ -10,14 +13,11 @@ from sysmind.infrastructure.database.repositories.settings import (
 )
 
 __all__ = [
-    "SqlAlchemyAgentTaskRepository",
     "SqlAlchemyActionRepository",
-    "SqlAlchemyLogAnalysisRepository",
+    "SqlAlchemyAgentTaskRepository",
     "SqlAlchemyDiagnosisRepository",
-    "SqlAlchemyScanRepository",
     "SqlAlchemyHistoryRepository",
+    "SqlAlchemyLogAnalysisRepository",
     "SqlAlchemyProviderSettingsRepository",
+    "SqlAlchemyScanRepository",
 ]
-from sysmind.infrastructure.database.repositories.agent_tasks import (
-    SqlAlchemyAgentTaskRepository,
-)

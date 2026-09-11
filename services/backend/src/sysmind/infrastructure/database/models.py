@@ -95,6 +95,9 @@ class ScanStepEvent(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Normalized parameter hash, matching event_log_step_events. Nullable only because the
+    # column was added after the table shipped; new rows always populate it.
+    arguments_hash: Mapped[str | None] = mapped_column(String(64))
     result_summary_json: Mapped[str | None] = mapped_column(Text)
     error_code: Mapped[str | None] = mapped_column(String(80))
     error_message: Mapped[str | None] = mapped_column(Text)
@@ -324,7 +327,11 @@ class DiagnosisStepModel(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
-    tool_call_id: Mapped[str | None] = mapped_column(ForeignKey("diagnosis_tool_calls.id"))
+    # SET NULL (not CASCADE): deleting a diagnosis removes its tool calls, and a step that
+    # still pointed at one must survive that cascade without failing the foreign key.
+    tool_call_id: Mapped[str | None] = mapped_column(
+        ForeignKey("diagnosis_tool_calls.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

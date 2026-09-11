@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
 
-from pydantic import SecretStr
-
-from sysmind.agent.contracts import ProviderError, ProviderRequest
-from sysmind.agent.providers import OpenAICompatibleConfig, OpenAICompatibleProvider
+from sysmind.agent.contracts import AgentProvider, ProviderError, ProviderRequest
+from sysmind.application.ports.agent_providers import AgentProviderFactory
 from sysmind.application.ports.secrets import SecretService
 from sysmind.application.ports.settings import ProviderSettingsRepository
 from sysmind.observability.logging import log_event
@@ -27,10 +26,14 @@ class PublicProviderSettings:
 
 class ProviderSettingsService:
     def __init__(
-        self, repository: ProviderSettingsRepository, secrets: SecretService
+        self,
+        repository: ProviderSettingsRepository,
+        secrets: SecretService,
+        provider_factory: AgentProviderFactory,
     ) -> None:
         self._repository = repository
         self._secrets = secrets
+        self._provider_factory = provider_factory
 
     def get(self) -> PublicProviderSettings:
         settings = self._repository.get()
@@ -56,11 +59,19 @@ class ProviderSettingsService:
         candidate_secret = api_key or previous_secret
         if not candidate_secret:
             raise ValueError("Provider API key is required.")
-        OpenAICompatibleConfig(endpoint, model, SecretStr(candidate_secret), 5.0)
+        # Validate the same normalized values that will be persisted, so validation and
+        # storage can never disagree about what was saved.
+        normalized_model = model.strip()
+        normalized_endpoint = endpoint.rstrip("/")
+        self._provider_factory.validate(
+            endpoint=normalized_endpoint, model=normalized_model, api_key=candidate_secret
+        )
         if api_key:
             self._secrets.set(_SECRET_REFERENCE, api_key)
         try:
-            self._repository.save(provider, model.strip(), endpoint.rstrip("/"), _SECRET_REFERENCE)
+            self._repository.save(
+                provider, normalized_model, normalized_endpoint, _SECRET_REFERENCE
+            )
         except Exception:
             if api_key:
                 if previous_secret is None:
@@ -78,7 +89,7 @@ class ProviderSettingsService:
             self._repository.save(settings.provider, settings.model, settings.endpoint, None)
         return self.get()
 
-    def configured_provider(self) -> OpenAICompatibleProvider | None:
+    def configured_provider(self) -> AgentProvider | None:
         settings = self._repository.get()
         if settings is None or settings.provider != "openai_compatible":
             return None
@@ -87,14 +98,14 @@ class ProviderSettingsService:
         )
         if not api_key:
             return None
-        return OpenAICompatibleProvider(
-            OpenAICompatibleConfig(
-                settings.endpoint, settings.model, SecretStr(api_key), timeout_seconds=5.0
-            )
+        return self._provider_factory.build(
+            endpoint=settings.endpoint, model=settings.model, api_key=api_key
         )
 
     async def test_connection(self) -> tuple[bool, str | None, int]:
-        provider = self.configured_provider()
+        # Resolving the provider reads SQLite and the Windows credential store, both
+        # blocking; keep them off the event loop.
+        provider = await asyncio.to_thread(self.configured_provider)
         if provider is None:
             raise ValueError("Provider credential is not configured.")
         started = time.monotonic()

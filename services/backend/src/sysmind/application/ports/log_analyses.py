@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from sysmind.domain.diagnostics import StepStatus
@@ -20,7 +21,7 @@ class LogAnalysisRepository(Protocol):
         current_step: str | None,
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
-        failures: list[dict[str, str]] | None = None,
+        failures: Sequence[dict[str, str]] | None = None,
     ) -> LogAnalysisRecord: ...
 
     def add_step_event(

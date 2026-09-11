@@ -29,18 +29,21 @@ def _coordinator(request: Request) -> ActionCoordinator:
 
 T = TypeVar("T")
 
+# Explicit status mapping. Anything not listed is a state conflict (409): consent tickets,
+# expired actions, and target changes all mean "the request conflicts with current state".
+_ERROR_STATUS: dict[str, int] = {
+    "action_not_found": status.HTTP_404_NOT_FOUND,
+    "process_actions_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+}
+
 
 def _run(call: Callable[[], T]) -> T:
     try:
         return call()
     except ActionError as error:
-        code = (
-            status.HTTP_404_NOT_FOUND
-            if error.code == "action_not_found"
-            else status.HTTP_409_CONFLICT
-        )
         raise HTTPException(
-            status_code=code, detail={"code": error.code, "message": str(error)}
+            status_code=_ERROR_STATUS.get(error.code, status.HTTP_409_CONFLICT),
+            detail={"code": error.code, "message": str(error)},
         ) from error
 
 

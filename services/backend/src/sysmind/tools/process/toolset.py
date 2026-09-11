@@ -13,6 +13,14 @@ PROCESS_TOOL_SPECS = (
 
 
 class ProcessTools:
+    """Read-only process collectors driven serially by the first-party scan coordinator.
+
+    Unlike the Tool Registry path, these handlers perform no policy authorization, input
+    validation, timeout or result normalization. They are called with fixed arguments and
+    must never be dispatched from model output; model-originated calls belong to the
+    registry/executor path.
+    """
+
     def __init__(self, probe: ProcessProbe) -> None:
         self._probe = probe
 

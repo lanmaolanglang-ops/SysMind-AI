@@ -14,6 +14,11 @@ from sysmind.reports.redaction import redact_text
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3}
 
 
+def _severity_rank(finding: Finding) -> int:
+    # Unknown severities sort last instead of raising KeyError and aborting the report.
+    return _SEVERITY_RANK.get(finding.severity, -1)
+
+
 def compose_report(
     category: DiagnosisCategory,
     findings: tuple[Finding, ...],
@@ -24,7 +29,7 @@ def compose_report(
     evidence_coverage: float = 1.0,
     confidence_cap: float = 1.0,
 ) -> DiagnosisReport:
-    ordered = tuple(sorted(findings, key=lambda item: _SEVERITY_RANK[item.severity], reverse=True))
+    ordered = tuple(sorted(findings, key=_severity_rank, reverse=True))
     conclusions = diagnostic_findings(ordered)
     if conclusions:
         primary = conclusions[0]

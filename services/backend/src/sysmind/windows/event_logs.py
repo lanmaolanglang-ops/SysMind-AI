@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Sequence
 from ctypes import wintypes
+from datetime import UTC, datetime
 from threading import Event
 from typing import Any, cast
 from xml.etree import ElementTree
@@ -18,6 +19,21 @@ from sysmind.tools.contracts import (
     ToolPermissionError,
     ToolUnavailableError,
 )
+
+
+def _event_time(value: str) -> datetime:
+    """Parse an event timestamp for ordering, tolerating unusual producer formats.
+
+    Lexicographic ordering of ISO-8601 strings is wrong when offsets or fractional-second
+    precision differ, so events are ordered by the parsed instant instead. Unparseable
+    values sort to the beginning rather than raising.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
 
 _LEVELS: dict[int, EventLevel] = {
     1: "critical",
@@ -218,7 +234,7 @@ class WindowsEventLogProbe:
                         self._api.EvtClose(event_handle)
         finally:
             self._api.EvtClose(result_handle)
-        events.sort(key=lambda item: item.timestamp, reverse=True)
+        events.sort(key=lambda item: _event_time(item.timestamp), reverse=True)
         return tuple(events)
 
     def _render_xml(self, event_handle: wintypes.HANDLE) -> str:

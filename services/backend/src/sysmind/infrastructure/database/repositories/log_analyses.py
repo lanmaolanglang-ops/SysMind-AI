@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from sysmind.application.ports.log_analyses import LogAnalysisRepository
 from sysmind.domain.diagnostics import StepStatus
 from sysmind.domain.event_logs import AnalysisStatus, LogAnalysisRecord
 from sysmind.infrastructure.database.models import EventLogAnalysis, EventLogStepEvent
@@ -22,7 +24,7 @@ def _to_record(model: EventLogAnalysis) -> LogAnalysisRecord:
         dict[str, object] | None,
         json.loads(model.summary_json) if model.summary_json else None,
     )
-    failures = cast(list[dict[str, str]], json.loads(model.failures_json))
+    failures = tuple(cast(list[dict[str, str]], json.loads(model.failures_json)))
     return LogAnalysisRecord(
         id=model.id,
         status=cast(AnalysisStatus, model.status),
@@ -37,7 +39,7 @@ def _to_record(model: EventLogAnalysis) -> LogAnalysisRecord:
     )
 
 
-class SqlAlchemyLogAnalysisRepository:
+class SqlAlchemyLogAnalysisRepository(LogAnalysisRepository):
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
 
@@ -66,7 +68,7 @@ class SqlAlchemyLogAnalysisRepository:
         current_step: str | None,
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
-        failures: list[dict[str, str]] | None = None,
+        failures: Sequence[dict[str, str]] | None = None,
     ) -> LogAnalysisRecord:
         with self._sessions.begin() as session:
             model = session.get(EventLogAnalysis, analysis_id)
@@ -79,7 +81,7 @@ class SqlAlchemyLogAnalysisRepository:
             if summary is not None:
                 model.summary_json = json.dumps(summary, ensure_ascii=False)
             if failures is not None:
-                model.failures_json = json.dumps(failures, ensure_ascii=False)
+                model.failures_json = json.dumps(list(failures), ensure_ascii=False)
         return _to_record(model)
 
     def add_step_event(

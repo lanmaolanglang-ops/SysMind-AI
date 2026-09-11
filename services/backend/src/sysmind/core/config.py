@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import secrets
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -64,6 +63,23 @@ class Settings(BaseSettings):
         return tuple(origin.strip() for origin in self.allowed_origins.split(",") if origin.strip())
 
 
-@lru_cache
+_settings: Settings | None = None
+
+
+def configure_settings(settings: Settings) -> Settings:
+    """Install the process-wide settings instance.
+
+    The startup path builds ``Settings`` explicitly (e.g. from CLI arguments) and must
+    become the single source of truth so that ``session_token`` — whose default is
+    randomly generated per instance — is never produced twice within one process.
+    """
+    global _settings
+    _settings = settings
+    return settings
+
+
 def get_settings() -> Settings:
-    return Settings()
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings

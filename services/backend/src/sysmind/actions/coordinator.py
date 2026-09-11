@@ -12,13 +12,37 @@ from sysmind.application.ports.actions import (
     TargetChangedError,
 )
 from sysmind.application.ports.diagnoses import DiagnosisRepository
-from sysmind.domain.actions import ActionRecord, ProcessActionCandidate, StartupActionCandidate
+from sysmind.domain.actions import (
+    CLOSE_PROCESS_TOOL,
+    DISABLE_STARTUP_TOOL,
+    RESTORE_STARTUP_TOOL,
+    TERMINATE_PROCESS_TOOL,
+    ActionRecord,
+    ProcessActionCandidate,
+    StartupActionCandidate,
+    action_tool_version,
+)
 from sysmind.security import ConsentError, ConsentService
+from sysmind.security.redaction import redact_text
 from sysmind.tools.contracts import ToolPermissionError, ToolUnavailableError
+
+# Bounded execution window for process actions; the consent ticket TTL is capped to the
+# remaining window so a user is never handed a ticket that outlives its own plan.
+PROCESS_PLAN_WINDOW_SECONDS = 30
+
+# Failure text is persisted and shown in the UI, so it is redacted and clamped.
+_MAX_ERROR_MESSAGE = 280
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _bounded_error(error: BaseException | str) -> str:
+    message = redact_text(str(error)).strip()
+    if not message:
+        return "受控动作未完成，系统没有改变。"
+    return message[:_MAX_ERROR_MESSAGE]
 
 
 class ActionError(ValueError):
@@ -70,7 +94,8 @@ class ActionCoordinator:
             plan_id=str(uuid.uuid4()),
             action_id=str(uuid.uuid4()),
             diagnosis_id=diagnosis_id,
-            tool_name="startup.disable_current_user",
+            tool_name=DISABLE_STARTUP_TOOL,
+            tool_version=action_tool_version(DISABLE_STARTUP_TOOL),
             target=target,
             created_at=_now(),
         )
@@ -120,7 +145,8 @@ class ActionCoordinator:
             plan_id=str(uuid.uuid4()),
             action_id=str(uuid.uuid4()),
             diagnosis_id=diagnosis_id,
-            tool_name="process.request_close_current_user",
+            tool_name=CLOSE_PROCESS_TOOL,
+            tool_version=action_tool_version(CLOSE_PROCESS_TOOL),
             target=target,
             created_at=_now(),
         )
@@ -151,13 +177,19 @@ class ActionCoordinator:
             plan_id=str(uuid.uuid4()),
             action_id=str(uuid.uuid4()),
             diagnosis_id=original.diagnosis_id,
-            tool_name="process.terminate_current_user",
+            tool_name=TERMINATE_PROCESS_TOOL,
+            tool_version=action_tool_version(TERMINATE_PROCESS_TOOL),
             target=target,
             created_at=_now(),
         )
 
     def create_restore(self, action_id: str) -> ActionRecord:
         original = self._required(action_id)
+        if original.tool_name != DISABLE_STARTUP_TOOL:
+            raise ActionError(
+                "unsupported_recovery",
+                "Only a startup disable action can be restored.",
+            )
         if original.status not in {"succeeded", "verification_failed"} or not original.recovery_id:
             raise ActionError("recovery_unavailable", "This action has no available recovery.")
         if not self._adapter.recovery_exists(original.recovery_id):
@@ -171,7 +203,7 @@ class ActionCoordinator:
 
     def confirm(self, action_id: str) -> tuple[ActionRecord, str | None, str | None]:
         action = self._required(action_id)
-        if action.tool_name == "process.terminate_current_user" and action.status == "proposed":
+        if action.tool_name == TERMINATE_PROCESS_TOOL and action.status == "proposed":
             now = _now()
             self._repository.add_confirmation_stage(action.id, stage=1, created_at=now)
             action = self._repository.set_status(
@@ -179,16 +211,26 @@ class ActionCoordinator:
             )
             return action, None, None
         if (
-            action.tool_name == "process.terminate_current_user"
+            action.tool_name == TERMINATE_PROCESS_TOOL
             and action.status == "awaiting_second_confirmation"
-            and self._age_seconds(action) > 30
+            and self._age_seconds(action) > PROCESS_PLAN_WINDOW_SECONDS
         ):
             self._repository.set_status(action.id, status="expired", updated_at=_now())
             raise ActionError("action_expired", "Termination confirmation window expired.")
         if action.status not in {"proposed", "awaiting_second_confirmation"}:
             raise ActionError("invalid_action_state", "Only a proposed action can be confirmed.")
+        # Process actions also have a bounded execution window; cap the ticket lifetime to
+        # whatever remains so the issued expiry matches when the plan can actually run.
+        ttl_seconds: int | None = None
+        if action.tool_name in {CLOSE_PROCESS_TOOL, TERMINATE_PROCESS_TOOL}:
+            remaining = PROCESS_PLAN_WINDOW_SECONDS - self._age_seconds(action)
+            ttl_seconds = max(1, int(remaining))
         issued = self._consent.issue(
-            action.id, action.tool_name, action.target_id, action.observed_revision
+            action.id,
+            action.tool_name,
+            action.target_id,
+            action.observed_revision,
+            ttl_seconds=ttl_seconds,
         )
         self._repository.add_confirmation(
             action.id, ticket_digest=issued.digest, expires_at=issued.expires_at, created_at=_now()
@@ -223,28 +265,32 @@ class ActionCoordinator:
                 )
             self._repository.set_status(action.id, status="executing", updated_at=_now())
             try:
-                if action.tool_name == "startup.disable_current_user":
+                if action.tool_name == DISABLE_STARTUP_TOOL:
                     result = self._adapter.disable(action.target_id, action.observed_revision)
-                elif action.tool_name == "startup.restore_current_user":
+                elif action.tool_name == RESTORE_STARTUP_TOOL:
                     result = self._adapter.restore(action.target_id)
-                elif action.tool_name == "process.request_close_current_user":
+                elif action.tool_name == CLOSE_PROCESS_TOOL:
                     if self._process_adapter is None:
                         raise ToolUnavailableError("Process actions are unavailable.")
                     created_at = datetime.fromisoformat(action.created_at)
                     if created_at.tzinfo is None:
                         created_at = created_at.replace(tzinfo=UTC)
-                    if (datetime.now(UTC) - created_at).total_seconds() > 30:
+                    if (
+                        datetime.now(UTC) - created_at
+                    ).total_seconds() > PROCESS_PLAN_WINDOW_SECONDS:
                         raise TargetChangedError("Process action plan expired; refresh the target.")
                     result = self._process_adapter.request_close(
                         action.target_id, action.observed_revision
                     )
-                elif action.tool_name == "process.terminate_current_user":
+                elif action.tool_name == TERMINATE_PROCESS_TOOL:
                     if self._process_adapter is None:
                         raise ToolUnavailableError("Process actions are unavailable.")
                     created_at = datetime.fromisoformat(action.created_at)
                     if created_at.tzinfo is None:
                         created_at = created_at.replace(tzinfo=UTC)
-                    if (datetime.now(UTC) - created_at).total_seconds() > 30:
+                    if (
+                        datetime.now(UTC) - created_at
+                    ).total_seconds() > PROCESS_PLAN_WINDOW_SECONDS:
                         raise TargetChangedError("Termination plan expired; refresh the target.")
                     result = self._process_adapter.terminate(
                         action.target_id, action.observed_revision
@@ -252,7 +298,7 @@ class ActionCoordinator:
                 else:
                     raise ToolUnavailableError("Action tool is not registered.")
                 self._repository.set_status(action.id, status="verifying", updated_at=_now())
-                if action.tool_name == "startup.restore_current_user":
+                if action.tool_name == RESTORE_STARTUP_TOOL:
                     self._repository.consume_recovery(action.target_id, consumed_at=_now())
                 if result.outcome == "close_pending":
                     return self._repository.set_status(
@@ -272,7 +318,7 @@ class ActionCoordinator:
                     updated_at=_now(),
                     recovery_id=error.recovery_id,
                     error_code="verification_failed",
-                    error_message=str(error),
+                    error_message=_bounded_error(error),
                 )
             except TargetChangedError as error:
                 return self._repository.set_status(
@@ -280,7 +326,7 @@ class ActionCoordinator:
                     status="target_changed",
                     updated_at=_now(),
                     error_code="target_changed",
-                    error_message=str(error),
+                    error_message=_bounded_error(error),
                 )
             except ToolPermissionError as error:
                 return self._repository.set_status(
@@ -288,7 +334,7 @@ class ActionCoordinator:
                     status="failed",
                     updated_at=_now(),
                     error_code="permission_required",
-                    error_message=str(error),
+                    error_message=_bounded_error(error),
                 )
             except ToolUnavailableError as error:
                 return self._repository.set_status(
@@ -296,7 +342,7 @@ class ActionCoordinator:
                     status="verification_failed",
                     updated_at=_now(),
                     error_code="verification_failed",
-                    error_message=str(error),
+                    error_message=_bounded_error(error),
                 )
             except OSError:
                 return self._repository.set_status(

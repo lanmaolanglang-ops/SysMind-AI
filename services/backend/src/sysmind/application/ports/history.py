@@ -1,37 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Protocol
 
-HistoryKind = Literal["scan", "diagnosis", "log"]
+from sysmind.domain.history import (
+    BaselineMetric,
+    CleanupResult,
+    DeletionImpact,
+    HistoryKind,
+)
 
-
-@dataclass(frozen=True)
-class DeletionImpact:
-    kind: HistoryKind
-    record_id: str
-    revision: str
-    deletable: bool
-    dependent_records: int
-    protected_reason: str | None = None
-
-
-@dataclass(frozen=True)
-class CleanupResult:
-    deleted_scans: int
-    deleted_diagnoses: int
-    deleted_log_analyses: int
-    protected_records: int
-    completed_at: str
-
-
-@dataclass(frozen=True)
-class BaselineMetric:
-    metric: str
-    samples: int
-    median: float
-    latest: float
-    delta: float
+__all__ = [
+    "BaselineMetric",
+    "CleanupResult",
+    "DeletionImpact",
+    "HistoryKind",
+    "HistoryRepository",
+]
 
 
 class HistoryRepository(Protocol):

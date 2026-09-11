@@ -13,6 +13,19 @@ from sysmind.tools.registry import ToolRegistry
 ProblemCategory: TypeAlias = Literal["performance", "network", "crash"]
 PlanStatus: TypeAlias = Literal["ready", "ask_user", "complete"]
 
+MAX_PLAN_STEPS = 8
+
+
+def remaining_plan_budget(calls: tuple[DiagnosisToolCall, ...]) -> int:
+    """How many further steps a revision may add.
+
+    Clamped at 0 so a diagnosis that already exceeded its budget tightens
+    instead of loosening: both planners must agree on this, otherwise a
+    provider-driven revision can silently accept steps the fake planner
+    would reject.
+    """
+    return max(0, MAX_PLAN_STEPS - len(calls))
+
 
 @dataclass(frozen=True, slots=True)
 class DiagnosisPlanStep:
@@ -73,7 +86,7 @@ def validate_plan(
     payload: PlanPayload,
     registry: ToolRegistry,
     *,
-    max_steps: int = 8,
+    max_steps: int = MAX_PLAN_STEPS,
     already_called: tuple[str, ...] = (),
 ) -> DiagnosisPlan:
     if payload.status == "ask_user":
@@ -245,7 +258,7 @@ class FakeDiagnosisPlanner:
                 steps=tuple(next_steps),
             ),
             self._registry,
-            max_steps=max(0, 8 - len(calls)),
+            max_steps=remaining_plan_budget(calls),
             already_called=signatures,
         )
 
@@ -298,14 +311,18 @@ class ProviderDiagnosisPlanner:
         if response.action.type == "finalize" and response.action.content == "no_revision":
             return None
         called = tuple(f"{call.tool_name}@{call.tool_version}" for call in calls)
-        return self._parse(response.action.content, already_called=called, max_steps=8 - len(calls))
+        return self._parse(
+            response.action.content,
+            already_called=called,
+            max_steps=remaining_plan_budget(calls),
+        )
 
     def _parse(
         self,
         content: str | None,
         *,
         already_called: tuple[str, ...] = (),
-        max_steps: int = 8,
+        max_steps: int = MAX_PLAN_STEPS,
     ) -> DiagnosisPlan:
         if not content:
             raise DiagnosisPlannerError("provider_protocol_error", "Planner returned no plan.")

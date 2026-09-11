@@ -13,6 +13,7 @@ from sysmind.agent.contracts import (
     AgentProvider,
     ProviderAction,
     ProviderActionType,
+    ProviderName,
     ProviderProtocolError,
     ProviderRateLimitError,
     ProviderRequest,
@@ -71,7 +72,7 @@ class OpenAICompatibleProvider(AgentProvider):
         self._client = client
 
     @property
-    def name(self) -> str:
+    def name(self) -> ProviderName:
         return "openai_compatible"
 
     async def complete(self, request: ProviderRequest) -> ProviderResponse:
@@ -175,10 +176,16 @@ class OpenAICompatibleProvider(AgentProvider):
         content = message.get("content")
         if not isinstance(content, str):
             raise ProviderProtocolError("The provider response has no usable content.")
+        # The agent prompt requires a JSON object, so unstructured prose is a
+        # protocol violation like every other malformed branch above. Silently
+        # finalising here made the brain path complete the task with model noise
+        # and gave the caller no way to tell a real answer from garbage.
         try:
             parsed = json.loads(content)
-        except json.JSONDecodeError:
-            return ProviderAction("finalize", content=content[:4000])
+        except json.JSONDecodeError as error:
+            raise ProviderProtocolError(
+                "The provider returned unstructured content where an action was required."
+            ) from error
         if not isinstance(parsed, dict):
             raise ProviderProtocolError("The provider action must be a JSON object.")
         if {"problem_category", "confidence", "status", "steps"} <= parsed.keys():

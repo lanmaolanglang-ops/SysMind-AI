@@ -10,6 +10,21 @@ from sysmind.agent.contracts import AgentProvider, ProviderRequest
 from sysmind.domain.diagnosis import DiagnosisCategory, Finding
 
 
+def provider_request_hash(request: ProviderRequest) -> str:
+    """Canonical, stable hash of a provider request used for the audit trail.
+
+    This is the single source of truth for how a request is serialized before hashing, so
+    tests assert against the real rule instead of re-implementing it.
+    """
+    serialized = json.dumps(
+        asdict(request),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
 class ReportExplainer(Protocol):
     @property
     def name(self) -> str: ...
@@ -91,13 +106,7 @@ class ProviderReportExplainer:
         self, category: DiagnosisCategory, question: str, findings: tuple[Finding, ...]
     ) -> str:
         del question  # Raw user questions are deliberately excluded from provider requests.
-        serialized = json.dumps(
-            asdict(self._request(category, findings)),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        return hashlib.sha256(serialized.encode()).hexdigest()
+        return provider_request_hash(self._request(category, findings))
 
     async def explain(
         self, category: DiagnosisCategory, question: str, findings: tuple[Finding, ...]

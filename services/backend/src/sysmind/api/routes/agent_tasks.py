@@ -17,6 +17,7 @@ from sysmind.api.dto.agent_tasks import (
     ToolDescriptorDto,
 )
 from sysmind.core.constants import CORRELATION_HEADER
+from sysmind.domain.agent_tasks import AgentTaskEvent
 from sysmind.tasks import AgentTaskManager
 from sysmind.tools.registry import ToolRegistryError
 
@@ -113,21 +114,51 @@ async def stream_agent_task_events(
     if cursor < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid event cursor.")
 
+    def _render(event: AgentTaskEvent) -> str:
+        payload = json.dumps(
+            {**event.data, "created_at": event.created_at}, ensure_ascii=False
+        )
+        return f"id: {event.id}\nevent: {event.event_type}\ndata: {payload}\n\n"
+
     async def event_stream() -> AsyncIterator[str]:
         nonlocal cursor
         heartbeat_at = time.monotonic()
         while True:
             if await request.is_disconnected():
                 return
-            events = await asyncio.to_thread(manager.events_after, task_id, cursor)
+            try:
+                events = await asyncio.to_thread(manager.events_after, task_id, cursor)
+                current = await asyncio.to_thread(manager.get, task_id)
+            except Exception:
+                # A storage error (e.g. a SQLite lock) must surface as a stream error
+                # event instead of an unexplained connection drop.
+                error_payload = json.dumps(
+                    {
+                        "error": {
+                            "code": "event_stream_failed",
+                            "message": "Task event stream stopped unexpectedly.",
+                        }
+                    },
+                    ensure_ascii=False,
+                )
+                yield f"event: error\ndata: {error_payload}\n\n"
+                return
             for event in events:
                 cursor = event.id
-                payload = json.dumps(
-                    {**event.data, "created_at": event.created_at}, ensure_ascii=False
-                )
-                yield f"id: {event.id}\nevent: {event.event_type}\ndata: {payload}\n\n"
-            current = await asyncio.to_thread(manager.get, task_id)
-            if current is None or (current.status in _TERMINAL and not events):
+                yield _render(event)
+            if current is None:
+                return
+            if current.status in _TERMINAL and not events:
+                # The task just reached a terminal state; give its final events one short
+                # window to become visible so task.completed is not dropped.
+                await asyncio.sleep(0.1)
+                try:
+                    trailing = await asyncio.to_thread(manager.events_after, task_id, cursor)
+                except Exception:
+                    trailing = []
+                for event in trailing:
+                    cursor = event.id
+                    yield _render(event)
                 return
             if time.monotonic() - heartbeat_at >= 10:
                 heartbeat_at = time.monotonic()

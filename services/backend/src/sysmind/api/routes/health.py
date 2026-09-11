@@ -8,11 +8,11 @@ router = APIRouter(tags=["runtime"])
 
 
 @router.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
+def health(request: Request) -> HealthResponse:
     return HealthResponse(
         backend_version=BACKEND_VERSION,
         api_version=API_VERSION,
-        ready=True,
+        ready=bool(getattr(request.app.state, "ready", False)),
     )
 
 

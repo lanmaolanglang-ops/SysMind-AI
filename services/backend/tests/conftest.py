@@ -34,5 +34,9 @@ def client(settings: Settings, shutdown_controller: ShutdownController) -> Itera
 
 
 @pytest.fixture
-def auth_headers() -> dict[str, str]:
-    return {"X-SysMind-Session": TEST_TOKEN, "Origin": "tauri://localhost"}
+def auth_headers(settings: Settings) -> dict[str, str]:
+    # Derive the header from the settings fixture so the token is defined in one place.
+    return {
+        "X-SysMind-Session": settings.session_token.get_secret_value(),
+        "Origin": "tauri://localhost",
+    }

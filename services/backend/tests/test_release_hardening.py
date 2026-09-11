@@ -12,11 +12,14 @@ from pydantic import ValidationError
 
 from sysmind.actions import ActionError
 from sysmind.api.dto.agent_tasks import StartAgentTaskRequest
+from sysmind.domain.actions import MutationResult
+from sysmind.infrastructure.database import create_session_factory
+from sysmind.infrastructure.database.repositories import SqlAlchemyActionRepository
 from sysmind.observability.logging import log_event
 from sysmind.reports.redaction import redact_text
 from sysmind.security import ConsentError, ConsentService
 from sysmind.security.redaction import is_sensitive_key
-from tests.test_phase5_actions import FakeStartupActions, coordinator
+from tests.fakes.actions import FakeStartupActions, coordinator
 
 BACKSLASH = chr(92)
 
@@ -43,7 +46,10 @@ def test_consume_confirmation_is_single_use_and_expiry_bound(tmp_path) -> None:
     action = service.create_disable(
         "diagnosis-ready", candidate.item_id, candidate.observed_revision
     )
-    repository = service._repository  # noqa: SLF001 - test seam for the CAS boundary
+    # Reach the repository directly instead of reading the coordinator's private field.
+    repository = SqlAlchemyActionRepository(
+        create_session_factory(f"sqlite:///{(tmp_path / 'actions.db').as_posix()}")
+    )
     repository.add_confirmation(
         action.id,
         ticket_digest="d" * 64,
@@ -70,18 +76,17 @@ def test_consume_confirmation_is_single_use_and_expiry_bound(tmp_path) -> None:
 
 def test_execute_maps_unexpected_adapter_error_to_terminal_failure(tmp_path) -> None:
     class ExplodingStartupActions(FakeStartupActions):
-        def disable(self, item_id: str, observed_revision: str) -> object:
+        def disable(self, item_id: str, observed_revision: str) -> MutationResult:
             raise RuntimeError("simulated adapter crash")
 
-    service, _adapter = coordinator(tmp_path)
+    # Inject an adapter that raises outside every mapped error family at construction time.
+    service, _adapter = coordinator(tmp_path, startup_adapter=ExplodingStartupActions())
     candidate = service.candidates("diagnosis-ready")[0]
     action = service.create_disable(
         "diagnosis-ready", candidate.item_id, candidate.observed_revision
     )
     confirmed, ticket, _expires = service.confirm(action.id)
     assert confirmed.status == "confirmed"
-    # Swap in an adapter that raises outside every mapped error family.
-    service._adapter = ExplodingStartupActions()  # noqa: SLF001 - test seam
     finished = service.execute(action.id, ticket)
     assert finished.status == "failed"
     assert finished.error_code == "action_failed"

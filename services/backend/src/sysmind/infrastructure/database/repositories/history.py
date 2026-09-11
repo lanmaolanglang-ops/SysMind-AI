@@ -9,7 +9,7 @@ from typing import cast
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from sysmind.application.ports.history import (
+from sysmind.domain.history import (
     BaselineMetric,
     CleanupResult,
     DeletionImpact,
@@ -17,16 +17,22 @@ from sysmind.application.ports.history import (
 )
 from sysmind.infrastructure.database.models import (
     ActionPlanModel,
+    AgentDecisionModel,
+    AgentPlanModel,
+    AgentStopReasonModel,
     DataCleanupRunModel,
     DataRetentionPolicyModel,
     Diagnosis,
     DiagnosisFeedback,
+    DiagnosisHypothesisModel,
     DiagnosisModelCall,
+    DiagnosisStepModel,
     DiagnosisToolCallModel,
     EventLogAnalysis,
     EventLogStepEvent,
     ScanStepEvent,
     SystemScan,
+    TaskUserInputModel,
 )
 
 
@@ -68,6 +74,8 @@ class SqlAlchemyHistoryRepository:
             stamp, record_status = analysis.finished_at, analysis.status
         else:
             diagnosis = cast(Diagnosis, model)
+            # Every table that hangs off a diagnosis counts toward the reported impact so
+            # the deletion preview and its revision token describe the whole cascade.
             dependent = sum(
                 session.scalar(select(func.count()).select_from(table).where(column == record_id))
                 or 0
@@ -75,6 +83,12 @@ class SqlAlchemyHistoryRepository:
                     (DiagnosisToolCallModel, DiagnosisToolCallModel.diagnosis_id),
                     (DiagnosisFeedback, DiagnosisFeedback.diagnosis_id),
                     (DiagnosisModelCall, DiagnosisModelCall.diagnosis_id),
+                    (AgentPlanModel, AgentPlanModel.diagnosis_id),
+                    (DiagnosisStepModel, DiagnosisStepModel.diagnosis_id),
+                    (AgentDecisionModel, AgentDecisionModel.diagnosis_id),
+                    (DiagnosisHypothesisModel, DiagnosisHypothesisModel.diagnosis_id),
+                    (AgentStopReasonModel, AgentStopReasonModel.diagnosis_id),
+                    (TaskUserInputModel, TaskUserInputModel.diagnosis_id),
                 )
             )
             action_plans = (
@@ -221,13 +235,29 @@ class SqlAlchemyHistoryRepository:
                 continue
             try:
                 data = cast(dict[str, object], json.loads(raw))
-                cpu = cast(dict[str, object], data.get("cpu", {})).get("utilization_percent")
-                memory = cast(dict[str, object], data.get("memory", {})).get("utilization_percent")
-                disks = cast(list[dict[str, object]], data.get("disks", []))
+                cpu_section = data.get("cpu")
+                memory_section = data.get("memory")
+                cpu = (
+                    cast(dict[str, object], cpu_section).get("utilization_percent")
+                    if isinstance(cpu_section, dict)
+                    else None
+                )
+                memory = (
+                    cast(dict[str, object], memory_section).get("utilization_percent")
+                    if isinstance(memory_section, dict)
+                    else None
+                )
+                raw_disks = data.get("disks")
+                disks = (
+                    cast(list[dict[str, object]], raw_disks)
+                    if isinstance(raw_disks, list)
+                    else []
+                )
                 disk_values = [
                     float(value)
                     for item in disks
-                    if isinstance((value := item.get("utilization_percent")), (int, float))
+                    if isinstance(item, dict)
+                    and isinstance((value := item.get("utilization_percent")), (int, float))
                 ]
                 disk = max(disk_values, default=None)
                 for name, value in (
@@ -237,7 +267,14 @@ class SqlAlchemyHistoryRepository:
                 ):
                     if isinstance(value, (int, float)):
                         samples[name].append(float(value))
-            except (TypeError, ValueError, json.JSONDecodeError, KeyError):
+            except (
+                AttributeError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+                KeyError,
+            ):
+                # A malformed historical summary must never break the baseline view.
                 continue
         return tuple(
             BaselineMetric(

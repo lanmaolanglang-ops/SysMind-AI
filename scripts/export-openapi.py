@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -13,7 +14,9 @@ def main() -> None:
     target = repository_root / "contracts" / "openapi" / "sysmind-local-api.json"
     settings = Settings(
         data_dir=repository_root / ".sysmind-data" / "openapi",
-        session_token=SecretStr("contract-generation-session-token"),
+        # The OpenAPI document does not depend on the token value; generate a throwaway one
+        # so no literal credential ever lives in source control.
+        session_token=SecretStr(secrets.token_urlsafe(32)),
     )
     document = create_app(settings).openapi()
     target.parent.mkdir(parents=True, exist_ok=True)

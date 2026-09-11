@@ -5,7 +5,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sysmind.security.redaction import is_sensitive_key
+from sysmind.security.redaction import is_sensitive_key, redact_text
 
 _RESERVED_LOG_KEYS = {
     "args",
@@ -40,6 +40,10 @@ def _sanitize(value: Any) -> Any:
         }
     if isinstance(value, (list, tuple)):
         return [_sanitize(item) for item in value]
+    if isinstance(value, str):
+        # Free-form strings can carry PII (user-profile paths, IPs, MACs) regardless
+        # of the key they are nested under, so every string value is redacted.
+        return redact_text(value)
     return value
 
 
@@ -51,7 +55,7 @@ class JsonFormatter(logging.Formatter):
             "component": getattr(record, "component", record.name),
             "event_type": getattr(record, "event_type", "application_log"),
             "correlation_id": getattr(record, "correlation_id", None),
-            "message": record.getMessage(),
+            "message": redact_text(record.getMessage()),
         }
         context = {
             key: value
@@ -62,7 +66,9 @@ class JsonFormatter(logging.Formatter):
         if context:
             payload["context"] = _sanitize(context)
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
+            # Tracebacks embed absolute file paths (with the account name) and the
+            # exception text, both of which may contain PII.
+            payload["exception"] = redact_text(self.formatException(record.exc_info))
         return json.dumps(_sanitize(payload), ensure_ascii=False, default=str)
 
 

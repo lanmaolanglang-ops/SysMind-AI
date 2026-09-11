@@ -16,6 +16,21 @@ import {
   type StartupActionCandidate,
 } from "../../services/actions";
 
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => resolve();
+    signal.addEventListener("abort", onAbort, { once: true });
+    window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+  });
+}
+
 export function ControlledActions({ client, diagnosisId }: { client: ApiClient; diagnosisId: string }) {
   const [candidates, setCandidates] = useState<StartupActionCandidate[] | null>(null);
   const [processes, setProcesses] = useState<ProcessActionCandidate[] | null>(null);
@@ -70,7 +85,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
           if (controller.signal.aborted) return;
           if (!(error instanceof ApiClientError)) break;
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        await abortableDelay(1_000, controller.signal);
       }
       if (!controller.signal.aborted && diagnosisRef.current === expectedDiagnosisId) {
         setCanCheckStatus(true);

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import text
 
+from sysmind.agent.providers import OpenAICompatibleProviderFactory
 from sysmind.api.app import create_app
 from sysmind.application.services.provider_settings import ProviderSettingsService
 from sysmind.core.config import Settings
@@ -31,6 +32,7 @@ def test_provider_settings_store_only_opaque_reference_and_never_return_key(
             create_session_factory(settings.database_url)
         ),
         secrets,
+        OpenAICompatibleProviderFactory(),
     )
     headers = {"X-SysMind-Session": token, "Origin": "tauri://localhost"}
 
@@ -62,6 +64,7 @@ def test_provider_endpoint_rejects_insecure_remote_http(tmp_path: Path) -> None:
     service = ProviderSettingsService(
         SqlAlchemyProviderSettingsRepository(create_session_factory(database_url)),
         FakeSecretService(),
+        OpenAICompatibleProviderFactory(),
     )
 
     try:
@@ -81,6 +84,7 @@ async def test_provider_test_connection_maps_unexpected_errors_to_failed_audit(
     service = ProviderSettingsService(
         SqlAlchemyProviderSettingsRepository(create_session_factory(database_url)),
         FakeSecretService(),
+        OpenAICompatibleProviderFactory(),
     )
 
     class ExplodingProvider:

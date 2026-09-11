@@ -5,7 +5,7 @@ import { ControlledActions } from "./ControlledActions";
 import {
   cancelDiagnosis,
   continueDiagnosis,
-  downloadDiagnosis,
+  fetchDiagnosisExport,
   getDiagnosis,
   recentDiagnoses,
   startDiagnosis,
@@ -237,9 +237,23 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
 
   const exportReport = (format: "json" | "markdown") => {
     if (!diagnosis) return;
-    void downloadDiagnosis(client, diagnosis.id, format).catch(() => {
-      setMessage("报告导出失败，请确认本地服务仍然连接。 ");
-    });
+    const target = diagnosis;
+    void fetchDiagnosisExport(client, target.id, format)
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `sysmind-report-${target.id}.${format === "markdown" ? "md" : "json"}`;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+        // Defer revocation: revoking synchronously after click can abort the download in
+        // Safari and some embedded WebViews.
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      })
+      .catch(() => {
+        setMessage("报告导出失败，请确认本地服务仍然连接。 ");
+      });
   };
 
   const callNames = new Map(
@@ -475,7 +489,7 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
               {diagnosis.report.limitations.length > 0 && (
                 <div className="report-limitations">
                   <h4>报告限制</h4>
-                  <ul>{diagnosis.report.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
+                  <ul>{diagnosis.report.limitations.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>
                 </div>
               )}
               {(diagnosis.status === "completed" || diagnosis.status === "partial") && diagnosis.category === "performance" && (

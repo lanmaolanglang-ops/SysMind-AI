@@ -4,6 +4,7 @@ import argparse
 import ctypes
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -16,6 +17,34 @@ from pathlib import Path
 import psutil
 
 WM_CLOSE = 0x0010
+
+_VERSIONS_DIR = (
+    Path(__file__).resolve().parents[1] / "services" / "backend" / "alembic" / "versions"
+)
+
+
+def expected_head_revision() -> str | None:
+    """Derive the migration head from the source scripts instead of hardcoding it.
+
+    A hardcoded revision has to be edited every time a migration is added, which makes the
+    packaged smoke test fail for reasons unrelated to packaging. Returns None when the head
+    cannot be determined (e.g. only packaged artifacts are available).
+    """
+    revisions: dict[str, str | None] = {}
+    for path in _VERSIONS_DIR.glob("*.py"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        revision = re.search(r'^revision: str = "([^"]+)"', text, re.MULTILINE)
+        if revision is None:
+            continue
+        down = re.search(r'^down_revision:[^=]*=\s*("[^"]+"|None)', text, re.MULTILINE)
+        down_value = None if down is None or down.group(1) == "None" else down.group(1).strip('"')
+        revisions[revision.group(1)] = down_value
+    referenced = {value for value in revisions.values() if value}
+    heads = [revision for revision in revisions if revision not in referenced]
+    return heads[0] if len(heads) == 1 else None
 
 
 def backend_children(desktop_pid: int) -> list[psutil.Process]:
@@ -57,6 +86,7 @@ def wait_for_backend_ready(process: psutil.Process, timeout: float = 20) -> None
 
 
 def wait_for_database_head(database_path: Path, timeout: float = 20) -> bool:
+    expected = expected_head_revision()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if database_path.is_file():
@@ -65,7 +95,12 @@ def wait_for_database_head(database_path: Path, timeout: float = 20) -> bool:
                     revision = database.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone()
-                if revision == ("0010_phase32",):
+                if revision is None:
+                    pass
+                elif expected is not None and revision == (expected,):
+                    return True
+                elif expected is None and isinstance(revision[0], str) and revision[0]:
+                    # Head unknown (packaged-only run): accept any recorded revision.
                     return True
             except sqlite3.Error:
                 pass

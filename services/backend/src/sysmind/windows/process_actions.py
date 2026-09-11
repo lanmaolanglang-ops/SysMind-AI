@@ -10,7 +10,7 @@ from typing import cast
 
 import psutil
 
-from sysmind.application.ports.actions import TargetChangedError
+from sysmind.application.ports.actions import ActionVerificationError, TargetChangedError
 from sysmind.domain.actions import MutationResult, ProcessActionCandidate
 from sysmind.tools.contracts import ToolUnavailableError
 from sysmind.windows.diagnostics import normalized_cpu_percent
@@ -157,13 +157,19 @@ class WindowsProcessActionAdapter:
             wintypes.LPARAM,
         )
         user32.PostMessageW.restype = wintypes.BOOL
+        delivered = 0
         for handle in handles:
             owner = wintypes.DWORD()
             user32.GetWindowThreadProcessId(wintypes.HWND(handle), ctypes.byref(owner))
             if owner.value != candidate.pid:
                 raise TargetChangedError("Window ownership changed after confirmation.")
-            if not user32.PostMessageW(wintypes.HWND(handle), _WM_CLOSE, 0, 0):
-                raise ToolUnavailableError("Windows rejected the bounded close request.")
+            if user32.PostMessageW(wintypes.HWND(handle), _WM_CLOSE, 0, 0):
+                delivered += 1
+        if not delivered:
+            # Only fail when nothing was delivered. Aborting on the first failure
+            # used to report "nothing happened" after earlier windows had already
+            # been asked to close, which the caller cannot undo.
+            raise ToolUnavailableError("Windows rejected every bounded close request.")
         deadline = time.monotonic() + self._wait
         while time.monotonic() < deadline:
             if not self._same_process(candidate):
@@ -199,7 +205,12 @@ class WindowsProcessActionAdapter:
             if not self._same_process(candidate):
                 return MutationResult(None, None, "terminated")
             time.sleep(0.05)
-        raise ToolUnavailableError("Process termination could not be verified.")
+        # TerminateProcess is asynchronous and was already accepted above, so a
+        # process that is still present means "not verified yet", not "Windows
+        # refused". ToolUnavailableError claimed the latter.
+        raise ActionVerificationError(
+            "Process termination was accepted but the process is still exiting."
+        )
 
     def _same_process(self, candidate: ProcessActionCandidate) -> bool:
         try:

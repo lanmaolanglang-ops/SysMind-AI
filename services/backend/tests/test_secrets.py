@@ -3,7 +3,6 @@ import ctypes
 from sysmind.application.ports.secrets import SecretService
 from sysmind.infrastructure.secrets import FakeSecretService
 from sysmind.infrastructure.secrets.windows_credential import (
-    _CRED_PERSIST_LOCAL_MACHINE,
     _CRED_TYPE_GENERIC,
     WindowsCredentialSecretService,
     _CredentialW,
@@ -38,17 +37,19 @@ def test_windows_credential_write_is_current_user_and_machine_local() -> None:
             )
             return True
 
+    # __init__ binds advapi32, which only exists on Windows. Skipping it keeps the
+    # struct marshalling under test on every platform; the fake replaces the DLL.
     service = object.__new__(WindowsCredentialSecretService)
     service._namespace = "SysMindAITest"
     service._advapi32 = FakeAdvapi32()
 
     service.set("provider.api_key", "temporary-secret")
 
-    assert _CRED_PERSIST_LOCAL_MACHINE == 2
     assert captured == {
         "type": _CRED_TYPE_GENERIC,
         "target": "SysMindAITest/provider.api_key",
-        "persist": _CRED_PERSIST_LOCAL_MACHINE,
+        # Pin the Win32 wire value instead of re-asserting our own constant.
+        "persist": 2,
         "username": "SysMind AI Provider",
         "value": "temporary-secret",
         "flags": 0,

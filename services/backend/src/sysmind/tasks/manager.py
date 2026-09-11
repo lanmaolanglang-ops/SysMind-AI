@@ -19,6 +19,7 @@ from sysmind.domain.agent_tasks import (
     AgentToolCallRecord,
 )
 from sysmind.observability.logging import log_event
+from sysmind.security.redaction import redact_text
 from sysmind.tools.executor import ToolExecutor
 from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolRegistry, ToolRegistryError
@@ -26,9 +27,25 @@ from sysmind.tools.registry import ToolRegistry, ToolRegistryError
 AGENT_TASK_SCHEMA_VERSION = "1.0"
 _LOGGER = logging.getLogger(__name__)
 
+# Failure text is persisted and surfaced over SSE, so it is bounded and redacted.
+_MAX_FAILURE_MESSAGE = 280
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _safe_failure_message(error: AgentRunError) -> str:
+    """Redact provider/adapter text before it is stored and shown to the UI.
+
+    ``AgentRunError`` can wrap transport errors (URLs, response fragments) or adapter
+    error strings. The adjacent generic handler deliberately uses fixed copy; this
+    path keeps diagnostics but runs the shared redactor and clamps the length.
+    """
+    message = redact_text(str(error)).strip()
+    if not message:
+        return "Agent task failed without exposing sensitive details."
+    return message[:_MAX_FAILURE_MESSAGE]
 
 
 class AgentTaskManager:
@@ -161,7 +178,7 @@ class AgentTaskManager:
             )
         except AgentRunError as error:
             status = "cancelled" if error.code == "cancelled" else "failed"
-            self._finish_failure(record, status, error.code, str(error))
+            self._finish_failure(record, status, error.code, _safe_failure_message(error))
         except asyncio.CancelledError:
             self._finish_failure(record, "cancelled", "cancelled", "Agent task was cancelled.")
         except Exception as error:

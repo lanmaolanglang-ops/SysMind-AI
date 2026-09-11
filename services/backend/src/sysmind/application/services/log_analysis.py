@@ -6,6 +6,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 from threading import Event
@@ -73,6 +74,10 @@ class LogAnalysisCoordinator:
         max_events: int,
         correlation_id: str | None = None,
     ) -> LogAnalysisRecord:
+        if not channels:
+            # Fail before persisting anything: an empty channel list would otherwise blow up
+            # inside the background task as an opaque IndexError.
+            raise ValueError("At least one event-log channel must be requested.")
         query: dict[str, object] = {
             "channels": list(channels),
             "lookback_hours": lookback_hours,
@@ -378,7 +383,7 @@ class LogAnalysisCoordinator:
         self,
         analysis_id: str,
         events: list[WindowsEvent],
-        failures: list[dict[str, str]],
+        failures: Sequence[dict[str, str]],
         *,
         max_events: int,
     ) -> None:

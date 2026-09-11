@@ -20,7 +20,7 @@ from sysmind.agent.contracts import (
 from sysmind.agent.memory import WorkingMemory, call_signature
 from sysmind.application.ports.agent_tasks import AgentTaskRepository
 from sysmind.domain.agent_tasks import AgentEventType, AgentTaskRecord, AgentTaskStatus
-from sysmind.security.redaction import is_sensitive_key
+from sysmind.security.redaction import redact_arguments
 from sysmind.tools.executor import ToolExecutionResult, ToolExecutor, arguments_hash
 from sysmind.tools.registry import ToolRegistry
 
@@ -34,13 +34,12 @@ def _hash(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+# Argument keys that carry an executable command line or shell/script payload. Any such
+# value is stored redacted in the audit trail, regardless of the exact key spelling.
 def _audit_arguments(arguments: dict[str, object], *, registered: bool) -> dict[str, object]:
     if not registered:
         return {"rejected_unregistered_arguments": True}
-    return {
-        key: "[REDACTED]" if is_sensitive_key(key) or key.casefold() == "command" else value
-        for key, value in arguments.items()
-    }
+    return redact_arguments(arguments)
 
 
 class AgentRunError(RuntimeError):
@@ -171,9 +170,17 @@ class AgentBrain:
                     return index, await self._execute_tool(task, call, cancel_event)
 
             indexed_results = await asyncio.gather(
-                *(execute_one(index) for index in range(len(action.tool_calls)))
+                *(execute_one(index) for index in range(len(action.tool_calls))),
+                # return_exceptions keeps sibling tasks from becoming orphaned when one
+                # fails; the first exception is re-raised below.
+                return_exceptions=True,
             )
-            for index, result in sorted(indexed_results):
+            completed: list[tuple[int, ToolExecutionResult]] = []
+            for item in indexed_results:
+                if isinstance(item, BaseException):
+                    raise item
+                completed.append(item)
+            for index, result in sorted(completed):
                 call = action.tool_calls[index]
                 memory.remember_tool_result(
                     name=call.name,
@@ -254,13 +261,16 @@ class AgentBrain:
         call_id = str(uuid.uuid4())
         digest = arguments_hash(tool_call.arguments)
         started_at = _now()
+        started_monotonic = time.monotonic()
         self._repository.create_tool_call(
             call_id=call_id,
             task_id=task.id,
             provider_call_id=tool_call.id,
             tool_name=tool_call.name,
             tool_version=tool_call.version,
-            arguments=_audit_arguments(tool_call.arguments, registered=definition is not None),
+            redacted_arguments=_audit_arguments(
+                tool_call.arguments, registered=definition is not None
+            ),
             arguments_hash=digest,
             risk_level=risk_level,
             started_at=started_at,
@@ -270,13 +280,28 @@ class AgentBrain:
             "tool.started",
             {"call_id": call_id, "tool": f"{tool_call.name}@{tool_call.version}"},
         )
-        result = await self._executor.execute(
-            name=tool_call.name,
-            version=tool_call.version,
-            arguments=tool_call.arguments,
-            allowed_tools=task.allowed_tools,
-            cancel_event=cancel_event,
-        )
+        try:
+            result = await self._executor.execute(
+                name=tool_call.name,
+                version=tool_call.version,
+                arguments=tool_call.arguments,
+                allowed_tools=task.allowed_tools,
+                cancel_event=cancel_event,
+            )
+        except BaseException:
+            # Cancellation (or any other escape) must still close the audit row, so the
+            # tool call never lingers as "running" with a missing finish timestamp.
+            self._repository.finish_tool_call(
+                call_id,
+                status="cancelled",
+                finished_at=_now(),
+                duration_ms=round((time.monotonic() - started_monotonic) * 1000),
+                full_result=None,
+                result_summary=None,
+                error_code="cancelled",
+                error_message="Tool execution was cancelled.",
+            )
+            raise
         self._repository.finish_tool_call(
             call_id,
             status=result.status,

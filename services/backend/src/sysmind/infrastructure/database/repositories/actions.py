@@ -10,11 +10,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.application.ports.actions import ActionRepository
 from sysmind.domain.actions import (
+    DISABLE_STARTUP_TOOL,
+    RESTORE_STARTUP_TOOL,
     ActionCandidate,
     ActionRecord,
     ActionStatus,
     StartupActionCandidate,
     StartupSourceKind,
+    action_tool_version,
 )
 from sysmind.infrastructure.database.models import (
     ActionEventModel,
@@ -56,6 +59,7 @@ class SqlAlchemyActionRepository(ActionRepository):
         action_id: str,
         diagnosis_id: str,
         tool_name: str,
+        tool_version: str,
         target: ActionCandidate,
         created_at: str,
     ) -> ActionRecord:
@@ -72,7 +76,7 @@ class SqlAlchemyActionRepository(ActionRepository):
                 plan_id=plan_id,
                 diagnosis_id=diagnosis_id,
                 tool_name=tool_name,
-                tool_version="1.0",
+                tool_version=tool_version,
                 target_id=target.item_id,
                 target_name=target.name,
                 source_kind=target.source_kind,
@@ -93,6 +97,8 @@ class SqlAlchemyActionRepository(ActionRepository):
     def create_restore(
         self, *, plan_id: str, action_id: str, original: ActionRecord, created_at: str
     ) -> ActionRecord:
+        if original.tool_name != DISABLE_STARTUP_TOOL:
+            raise ValueError("Only a startup disable action can be restored.")
         if not original.recovery_id:
             raise ValueError("Action has no recovery record.")
         target = StartupActionCandidate(
@@ -106,7 +112,8 @@ class SqlAlchemyActionRepository(ActionRepository):
             plan_id=plan_id,
             action_id=action_id,
             diagnosis_id=original.diagnosis_id,
-            tool_name="startup.restore_current_user",
+            tool_name=RESTORE_STARTUP_TOOL,
+            tool_version=action_tool_version(RESTORE_STARTUP_TOOL),
             target=target,
             created_at=created_at,
         )
@@ -263,6 +270,6 @@ class SqlAlchemyActionRepository(ActionRepository):
             return len(rows)
 
     def close(self) -> None:
-        bind = self._sessions.kw.get("bind")
-        if bind is not None:
-            bind.dispose()
+        # The session factory (and its engine) is owned by the composition root and may
+        # be shared with other repositories, so it must not be disposed from here.
+        return None

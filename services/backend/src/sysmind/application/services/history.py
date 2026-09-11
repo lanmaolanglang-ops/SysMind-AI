@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from sysmind.application.ports.history import (
+from sysmind.application.ports.history import HistoryRepository
+from sysmind.domain.history import (
     BaselineMetric,
     CleanupResult,
     DeletionImpact,
     HistoryKind,
-    HistoryRepository,
 )
 
 

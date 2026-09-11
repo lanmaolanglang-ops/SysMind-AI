@@ -37,6 +37,17 @@ from sysmind.infrastructure.database.models import (
 )
 from sysmind.tools.executor import arguments_hash
 
+# Registry names are validated as ``name@major.minor``; when a planner step omits the
+# version suffix we fall back to the baseline version instead of failing the whole plan.
+DEFAULT_TOOL_VERSION = "1.0"
+
+
+def _split_tool_reference(reference: str) -> tuple[str, str]:
+    parts = reference.rsplit("@", 1)
+    if len(parts) == 2 and parts[0] and parts[1]:
+        return parts[0], parts[1]
+    return reference, DEFAULT_TOOL_VERSION
+
 
 def _report(data: dict[str, object] | None) -> DiagnosisReport | None:
     if data is None:
@@ -186,6 +197,8 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             diagnosis.plan_confidence = float(cast(float, plan["confidence"]))
             diagnosis.planner_status = str(plan["status"])
             diagnosis.clarification_question = cast(str | None, plan["clarification_question"])
+            # NOTE: agent_round_count tracks the planner/agent revision number (the value
+            # the coordinator reads back as `revision`), not raw model rounds.
             diagnosis.agent_round_count = max(diagnosis.agent_round_count, revision)
             existing = cast(list[dict[str, object]], json.loads(diagnosis.plan_json))
             existing.extend(
@@ -268,7 +281,9 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             if model is None:
                 raise KeyError(diagnosis_id)
             model.status = "waiting_user_input"
-            model.current_step = question
+            # The pending question belongs in clarification_question; current_step keeps
+            # its own "what is happening now" meaning and must not be repurposed.
+            model.clarification_question = question
         return _record(model)
 
     def resume_with_input(
@@ -435,7 +450,7 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
         diagnosis_id: str,
         tool_name: str,
         tool_version: str,
-        arguments: dict[str, object],
+        redacted_arguments: dict[str, object],
         arguments_hash: str,
         started_at: str,
     ) -> None:
@@ -446,7 +461,7 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                     diagnosis_id=diagnosis_id,
                     tool_name=tool_name,
                     tool_version=tool_version,
-                    arguments_json=json.dumps(arguments, ensure_ascii=False),
+                    arguments_json=json.dumps(redacted_arguments, ensure_ascii=False),
                     arguments_hash=arguments_hash,
                     status="running",
                     started_at=datetime.fromisoformat(started_at),
@@ -525,15 +540,18 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                     select(Diagnosis).where(Diagnosis.status.in_(("queued", "running")))
                 )
             )
+            # NOTE: `waiting_user_input` is intentionally NOT interrupted. A diagnosis
+            # paused for clarification stays resumable after a restart (the user's answer
+            # is submitted later); forcing it to `interrupted` would strand their input.
             for model in models:
                 model.status, model.failure_code = "interrupted", "backend_restarted"
                 model.failure_message = "本地服务重启，诊断未自动重放。"
                 model.completed_at = datetime.fromisoformat(completed_at)
-                model.stop_reason = "risk_limit_reached"
+                model.stop_reason = "backend_restarted"
                 session.add(
                     AgentStopReasonModel(
                         diagnosis_id=model.id,
-                        reason="risk_limit_reached",
+                        reason="backend_restarted",
                         detail="本地服务重启，中断中的工具调用不会自动重放。",
                         terminal_status="interrupted",
                         created_at=datetime.fromisoformat(completed_at),

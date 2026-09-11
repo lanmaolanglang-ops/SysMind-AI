@@ -133,9 +133,9 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
       {message && <p role="status" className="diagnosis-message">{message}</p>}
       <div className="retention-settings">
         <div><strong>本地历史保留</strong><p>只清理已结束的扫描、日志和未关联动作的诊断；动作与恢复审计始终保留。</p></div>
-        <label>天数<input type="number" min="7" max="3650" value={retentionDays} onChange={(event) => setRetentionDays(Number(event.target.value))} /></label>
+        <label>天数<input type="number" min="7" max="3650" value={retentionDays} onChange={(event) => { const parsed = Number(event.target.value); setRetentionDays(Number.isFinite(parsed) ? parsed : 0); }} /></label>
         <div className="settings-actions">
-          <button type="button" onClick={saveDataPolicy} disabled={busy || retentionDays < 7 || retentionDays > 3650}>保存策略</button>
+          <button type="button" onClick={saveDataPolicy} disabled={busy || !Number.isFinite(retentionDays) || retentionDays < 7 || retentionDays > 3650}>保存策略</button>
           <button type="button" onClick={cleanup} disabled={busy}>立即清理</button>
         </div>
       </div>

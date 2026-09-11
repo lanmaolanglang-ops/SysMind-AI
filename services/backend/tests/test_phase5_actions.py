@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -8,184 +7,16 @@ import psutil
 import pytest
 from fastapi.testclient import TestClient
 
-from sysmind.actions import ActionCoordinator, ActionError
+from sysmind.actions import ActionError
 from sysmind.api.dto.actions import ActionResponse
-from sysmind.application.ports.actions import ActionVerificationError
 from sysmind.domain.actions import (
-    MutationResult,
-    ProcessActionCandidate,
     StartupActionCandidate,
 )
-from sysmind.infrastructure.database import create_session_factory, run_migrations
-from sysmind.infrastructure.database.models import ActionModel, Diagnosis, DiagnosisToolCallModel
-from sysmind.infrastructure.database.repositories import (
-    SqlAlchemyActionRepository,
-    SqlAlchemyDiagnosisRepository,
-)
-from sysmind.security import ConsentService
+from sysmind.infrastructure.database import create_session_factory
+from sysmind.infrastructure.database.models import ActionModel
 from sysmind.tools.contracts import ToolUnavailableError
 from sysmind.windows.process_actions import WindowsProcessActionAdapter
-from sysmind.windows.startup_actions import TargetChangedError
-
-
-class FakeStartupActions:
-    def __init__(self) -> None:
-        self.item = StartupActionCandidate("a" * 64, "Example", "user_run", "example.exe", "b" * 64)
-        self.enabled = True
-        self.recoveries: set[str] = set()
-        self.fail_verification = False
-
-    def candidates(self) -> tuple[StartupActionCandidate, ...]:
-        return (self.item,) if self.enabled else ()
-
-    def disable(self, item_id: str, observed_revision: str) -> MutationResult:
-        if (
-            not self.enabled
-            or item_id != self.item.item_id
-            or observed_revision != self.item.observed_revision
-        ):
-            raise TargetChangedError("changed")
-        self.enabled = False
-        self.recoveries.add("recovery-1")
-        if self.fail_verification:
-            raise ActionVerificationError(
-                "Startup action could not be verified.", recovery_id="recovery-1"
-            )
-        return MutationResult("recovery-1", None)
-
-    def restore(self, recovery_id: str) -> MutationResult:
-        if recovery_id not in self.recoveries or self.enabled:
-            raise TargetChangedError("changed")
-        self.recoveries.remove(recovery_id)
-        self.enabled = True
-        return MutationResult(None, self.item.observed_revision)
-
-    def recovery_exists(self, recovery_id: str) -> bool:
-        return recovery_id in self.recoveries
-
-
-class FakeProcessActions:
-    def __init__(self, outcome: str = "closed") -> None:
-        self.item = ProcessActionCandidate(
-            "d" * 64,
-            "Editor.exe",
-            "current_user_process",
-            "editor.exe",
-            "e" * 64,
-            4242,
-            42.0,
-            12.0,
-        )
-        self.outcome = outcome
-        self.calls = 0
-        self.terminate_calls = 0
-
-    def candidates(self) -> tuple[ProcessActionCandidate, ...]:
-        return (self.item,)
-
-    def request_close(self, item_id: str, observed_revision: str) -> MutationResult:
-        if item_id != self.item.item_id or observed_revision != self.item.observed_revision:
-            raise TargetChangedError("changed")
-        self.calls += 1
-        return MutationResult(None, None, self.outcome)
-
-    def terminate(self, item_id: str, observed_revision: str) -> MutationResult:
-        if item_id != self.item.item_id or observed_revision != self.item.observed_revision:
-            raise TargetChangedError("changed")
-        self.terminate_calls += 1
-        return MutationResult(None, None, "terminated")
-
-
-def coordinator(
-    tmp_path: Path,
-    process_adapter: FakeProcessActions | None = None,
-    *,
-    diagnosis_id: str = "diagnosis-ready",
-) -> tuple[ActionCoordinator, FakeStartupActions]:
-    database_url = f"sqlite:///{(tmp_path / 'actions.db').as_posix()}"
-    run_migrations(database_url)
-    sessions = create_session_factory(database_url)
-    now = datetime.now(UTC)
-    with sessions.begin() as session:
-        session.add(
-            Diagnosis(
-                id=diagnosis_id,
-                status="completed",
-                user_question="slow",
-                category="performance",
-                provider="fake",
-                plan_json="[]",
-                progress=100,
-                created_at=now,
-                completed_at=now,
-                report_json=json.dumps(
-                    {
-                        "schema_version": "1.0",
-                        "summary": "high usage",
-                        "category": "performance",
-                        "findings": [
-                            {
-                                "id": "finding-process",
-                                "code": "resource_competition",
-                                "severity": "medium",
-                                "title": "high usage",
-                                "explanation": "evidence",
-                                "recommendation": "review",
-                                "confidence": 0.8,
-                                "evidence": [
-                                    {
-                                        "tool_call_id": "process-call",
-                                        "field_path": "$",
-                                    }
-                                ],
-                            }
-                        ],
-                        "confidence": 0.8,
-                        "limitations": [],
-                        "model_explanation": "local",
-                    }
-                ),
-                schema_version="1.0",
-            )
-        )
-        session.add(
-            DiagnosisToolCallModel(
-                id="startup-call",
-                diagnosis_id=diagnosis_id,
-                tool_name="startup.analyze",
-                tool_version="1.0",
-                arguments_json="{}",
-                arguments_hash="c" * 64,
-                status="completed",
-                result_json="{}",
-                started_at=now,
-                finished_at=now,
-                duration_ms=1,
-            )
-        )
-        session.add(
-            DiagnosisToolCallModel(
-                id="process-call",
-                diagnosis_id=diagnosis_id,
-                tool_name="process.high_usage",
-                tool_version="1.0",
-                arguments_json="{}",
-                arguments_hash="f" * 64,
-                status="completed",
-                result_json=json.dumps([{"pid": 4242, "name": "Editor.exe"}]),
-                started_at=now,
-                finished_at=now,
-                duration_ms=1,
-            )
-        )
-    adapter = FakeStartupActions()
-    return ActionCoordinator(
-        SqlAlchemyActionRepository(sessions),
-        SqlAlchemyDiagnosisRepository(sessions),
-        adapter,
-        ConsentService("session"),
-        process_adapter,
-    ), adapter
+from tests.fakes.actions import FakeProcessActions, coordinator
 
 
 def test_disable_requires_bound_single_use_consent_and_can_recover(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ from typing import Any, cast
 from sysmind.application.ports.actions import ActionVerificationError, TargetChangedError
 from sysmind.domain.actions import MutationResult, StartupActionCandidate
 from sysmind.tools.contracts import ToolPermissionError, ToolUnavailableError
+from sysmind.windows.platform_inspection import _basename
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _REPARSE_POINT = 0x400
@@ -20,14 +21,20 @@ def _digest(*parts: object) -> str:
     return hashlib.sha256("\0".join(str(part) for part in parts).encode()).hexdigest()
 
 
-def _basename(command: str) -> str | None:
-    text = command.strip()
-    if not text:
-        return None
-    executable = (
-        text.split('"', 2)[1] if text.startswith('"') and '"' in text[1:] else text.split()[0]
-    )
-    return Path(executable).name or None
+# Recovery metadata is read back from disk and its `name` is reused as a Run key
+# value name and as a Startup folder file name. Anything that can write the
+# recovery directory would otherwise choose that name, so keep it to what a real
+# startup entry can be: bounded, printable, and free of path/wildcard characters.
+_MAX_ENTRY_NAME_LENGTH = 255
+_FORBIDDEN_ENTRY_NAME_CHARS = frozenset('\\/:*?"<>|')
+
+
+def _require_safe_entry_name(name: str) -> str:
+    if not 1 <= len(name) <= _MAX_ENTRY_NAME_LENGTH:
+        raise TargetChangedError("Recovery record is invalid.")
+    if any(char in _FORBIDDEN_ENTRY_NAME_CHARS or ord(char) < 32 for char in name):
+        raise TargetChangedError("Recovery record is invalid.")
+    return name
 
 
 class WindowsStartupActionAdapter:
@@ -139,6 +146,7 @@ class WindowsStartupActionAdapter:
         kind, name = metadata.get("kind"), metadata.get("name")
         if not isinstance(name, str) or kind not in {"user_run", "user_startup"}:
             raise TargetChangedError("Recovery record is invalid.")
+        _require_safe_entry_name(name)
         item_id = _digest(kind, name)
         if any(item.item_id == item_id for item in self.candidates()):
             raise TargetChangedError("Startup target slot is already occupied.")

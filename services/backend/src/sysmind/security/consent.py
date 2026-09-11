@@ -26,11 +26,24 @@ class ConsentService:
         self._session = hashlib.sha256(session_binding.encode()).hexdigest()
         self._ttl = ttl_seconds
 
+    @property
+    def ttl_seconds(self) -> int:
+        return self._ttl
+
     def issue(
-        self, action_id: str, tool_name: str, target_id: str, observed_revision: str
+        self,
+        action_id: str,
+        tool_name: str,
+        target_id: str,
+        observed_revision: str,
+        *,
+        ttl_seconds: int | None = None,
     ) -> IssuedConsent:
         now = datetime.now(UTC)
-        expires = now + timedelta(seconds=self._ttl)
+        # A shorter per-issue TTL keeps the advertised ticket expiry honest when the
+        # action plan itself has a tighter, action-specific window.
+        effective_ttl = self._ttl if ttl_seconds is None else max(1, ttl_seconds)
+        expires = now + timedelta(seconds=effective_ttl)
         payload = {
             "action_id": action_id,
             "tool": tool_name,

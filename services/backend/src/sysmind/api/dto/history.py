@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from sysmind.application.ports.history import BaselineMetric, CleanupResult, DeletionImpact
+from sysmind.domain.history import BaselineMetric, CleanupResult, DeletionImpact
 
 
 class DeletionImpactResponse(BaseModel):

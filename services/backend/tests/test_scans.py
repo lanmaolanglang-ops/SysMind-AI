@@ -28,8 +28,8 @@ from sysmind.infrastructure.database import (
 )
 from sysmind.infrastructure.database.repositories import SqlAlchemyScanRepository
 from sysmind.tools.contracts import ToolCancelledError, ToolSpec, ToolUnavailableError
-from sysmind.tools.process import ProcessTools
-from sysmind.tools.system import SystemTools
+from sysmind.tools.process import PROCESS_TOOL_SPECS, ProcessTools
+from sysmind.tools.system import SYSTEM_TOOL_SPECS, SystemTools
 
 
 class FixtureSystemProbe:
@@ -146,7 +146,9 @@ def test_quick_scan_collects_versioned_read_only_snapshot(
             {"scan_id": payload["id"]},
         ).scalar_one()
     engine.dispose()
-    assert audit_count == 7
+    # One audit row per versioned step; derive the count instead of hardcoding it so adding
+    # a tool spec does not break this test.
+    assert audit_count == len(SYSTEM_TOOL_SPECS) + len(PROCESS_TOOL_SPECS)
 
 
 def test_quick_scan_preserves_partial_results_when_capability_is_unavailable(

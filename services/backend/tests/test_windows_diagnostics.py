@@ -127,3 +127,29 @@ def test_windows_quick_scan_api_smoke(tmp_path: Path) -> None:
     assert payload["summary"]["operating_system"]["name"] == "Windows"
     assert payload["summary"]["cpu"]["logical_cores"] > 0
     assert payload["summary"]["memory"]["total_bytes"] > 0
+
+
+def test_basename_survives_unquoted_paths_with_spaces() -> None:
+    """Registry command lines are often stored unquoted even when they contain spaces.
+
+    Splitting on the first space truncated "C:/Program Files/App/app.exe" down to
+    "C:/Program", so the display name was meaningless.
+    """
+    from sysmind.windows.platform_inspection import _basename
+
+    assert _basename('"C:/Program Files/App/app.exe" --minimised') == "app.exe"
+    assert _basename("C:/Program Files/App/app.exe --minimised") == "app.exe"
+    assert _basename("C:/Program Files/App/app.exe") == "app.exe"
+    assert _basename("C:/Program Files/App/launcher.cmd --silent") == "launcher.cmd"
+    assert _basename("C:/Program Files/App/app.exe") == "app.exe"
+    assert _basename("   ") is None
+
+
+def test_recovery_entry_name_rejects_path_and_wildcard_characters() -> None:
+    from sysmind.application.ports.actions import TargetChangedError
+    from sysmind.windows.startup_actions import _require_safe_entry_name
+
+    assert _require_safe_entry_name("OneDrive") == "OneDrive"
+    for rejected in ("..\\evil", "nested/name", "name:stream", 'quo"te', "wild*", "", "x" * 256):
+        with pytest.raises(TargetChangedError):
+            _require_safe_entry_name(rejected)

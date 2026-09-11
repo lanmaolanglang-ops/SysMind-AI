@@ -28,6 +28,10 @@ class CpuInfo:
     frequency_mhz: float | None
 
 
+# Neutral, adapter-agnostic copy shown whenever real-time GPU telemetry is unavailable.
+GPU_TELEMETRY_UNAVAILABLE = "Real-time GPU utilization is unavailable."
+
+
 @dataclass(frozen=True, slots=True)
 class GpuInfo:
     name: str
@@ -36,9 +40,17 @@ class GpuInfo:
     telemetry_available: bool = False
     utilization_percent: float | None = None
     memory_used_bytes: int | None = None
-    telemetry_limitation: str | None = (
-        "Real-time GPU utilization is unavailable from the metadata-only Windows adapter."
-    )
+    telemetry_limitation: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.telemetry_available:
+            if self.telemetry_limitation is not None:
+                raise ValueError("Available GPU telemetry cannot also declare a limitation.")
+            return
+        # Unavailable telemetry always carries an explanation, so consumers never have to
+        # guess why utilization is missing.
+        if self.telemetry_limitation is None:
+            object.__setattr__(self, "telemetry_limitation", GPU_TELEMETRY_UNAVAILABLE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,5 +94,11 @@ class ScanRecord:
     started_at: str
     finished_at: str | None
     summary: dict[str, object] | None
-    failures: list[dict[str, str]]
+    failures: tuple[dict[str, str], ...]
     schema_version: str
+
+    def __post_init__(self) -> None:
+        # `frozen=True` blocks attribute rebinding but not mutation of the containers, so
+        # the mapping is copied to stop an external reference from mutating the record.
+        if self.summary is not None:
+            object.__setattr__(self, "summary", dict(self.summary))

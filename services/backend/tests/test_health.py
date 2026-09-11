@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import uuid
+
 from fastapi.testclient import TestClient
 
 from sysmind.core.constants import API_VERSION, BACKEND_VERSION
@@ -16,7 +20,8 @@ def test_health_returns_versioned_readiness(
         "api_version": API_VERSION,
         "ready": True,
     }
-    assert response.headers["X-Correlation-ID"]
+    # No correlation id was supplied, so the server must generate a well-formed UUID.
+    uuid.UUID(response.headers["X-Correlation-ID"])
 
 
 def test_health_rejects_missing_session(client: TestClient) -> None:
@@ -61,3 +66,28 @@ def test_shutdown_requests_graceful_stop(
     assert response.status_code == 200
     assert response.json() == {"status": "shutting_down"}
     assert shutdown_controller.requested is True
+
+
+def test_health_replaces_a_client_supplied_correlation_id_that_is_not_safe(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    response = client.get(
+        "/health",
+        headers={**auth_headers, "X-Correlation-ID": "not a valid; id"},
+    )
+
+    assert response.status_code == 200
+    echoed = response.headers["X-Correlation-ID"]
+    assert echoed != "not a valid; id"
+    uuid.UUID(echoed)
+
+
+def test_health_echoes_a_well_formed_correlation_id(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    response = client.get(
+        "/health", headers={**auth_headers, "X-Correlation-ID": "correlation-abc-123"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == "correlation-abc-123"

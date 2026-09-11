@@ -10,11 +10,13 @@ from sqlalchemy import text
 from sysmind.agent.context import AgentContextBuilder
 from sysmind.agent.contracts import ProviderAction, ProviderResponse
 from sysmind.agent.planning import (
+    MAX_PLAN_STEPS,
     DiagnosisPlannerError,
     FakeDiagnosisPlanner,
     PlanPayload,
     PlanStepPayload,
     ProviderDiagnosisPlanner,
+    remaining_plan_budget,
     validate_plan,
 )
 from sysmind.agent.providers import FakeProvider
@@ -356,3 +358,24 @@ def test_plan_steps_and_decisions_are_persisted_for_audit(settings: Settings) ->
     engine.dispose()
     assert counts == (1, 1, 1)
     assert reason == "检查内存压力"
+
+
+def test_revision_budget_is_clamped_and_shared_by_both_planners() -> None:
+    def call(index: int) -> DiagnosisToolCall:
+        return DiagnosisToolCall(
+            id=f"call-{index}",
+            diagnosis_id="phase31-budget",
+            tool_name="system.snapshot",
+            tool_version="1.0",
+            status="completed",
+            result=None,
+            summary={},
+            error_code=None,
+        )
+
+    assert remaining_plan_budget(()) == MAX_PLAN_STEPS
+    assert remaining_plan_budget(tuple(call(i) for i in range(3))) == MAX_PLAN_STEPS - 3
+    # An over-budget history must tighten, never loosen. The two planners used to
+    # disagree here: one clamped to 0, the other produced a negative budget that
+    # silently allowed any number of steps.
+    assert remaining_plan_budget(tuple(call(i) for i in range(MAX_PLAN_STEPS + 2))) == 0

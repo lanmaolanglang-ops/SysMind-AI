@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from sysmind.core.config import Settings
+from sysmind.core.config import Settings, configure_settings
 from sysmind.runtime.server import report_startup_failure, run_server
 
 
@@ -24,6 +24,9 @@ def main() -> None:
         )
     else:
         settings = Settings(host=args.host, port=args.port)
+    # Bind the process-wide settings before anything can call get_settings(), so the
+    # randomly generated session token is created exactly once per process.
+    configure_settings(settings)
     try:
         run_server(settings)
     except BaseException as error:

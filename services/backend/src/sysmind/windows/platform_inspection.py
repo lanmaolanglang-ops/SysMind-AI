@@ -62,6 +62,25 @@ def _check_cancel(cancel_event: Event) -> None:
         raise ToolCancelledError("Tool execution was cancelled.")
 
 
+# Registry command lines are frequently stored *unquoted* even when the path
+# contains spaces, so splitting on the first space truncates
+# "C:\Program Files\App\app.exe" down to "C:\Program". Anchoring on the
+# executable extension recovers the real path for the common case.
+_EXECUTABLE_SUFFIXES = (".exe", ".cmd", ".bat", ".com", ".ps1", ".vbs", ".js", ".wsf")
+
+
+def _executable_token(text: str) -> str:
+    lowered = text.lower()
+    for suffix in _EXECUTABLE_SUFFIXES:
+        index = lowered.find(suffix)
+        if index == -1:
+            continue
+        end = index + len(suffix)
+        if end == len(text) or text[end] in " \t'\"":
+            return text[:end]
+    return text.split()[0]
+
+
 def _basename(command: str) -> str | None:
     text = command.strip()
     if not text:
@@ -69,7 +88,7 @@ def _basename(command: str) -> str | None:
     if text.startswith('"') and '"' in text[1:]:
         executable = text.split('"', 2)[1]
     else:
-        executable = text.split()[0]
+        executable = _executable_token(text)
     return Path(executable).name or None
 
 
@@ -266,11 +285,17 @@ class WindowsNetworkProbe:
                 )
             except ToolUnavailableError:
                 failures.append("gateway_icmp_unavailable")
-        elif active_adapters and gateways is None:
+        elif gateways is None:
+            # The route table could not be read regardless of whether an adapter
+            # happens to be up, so the reason must be recorded either way.
             failures.append("default_route_unavailable")
+        # Both of these mean "we do not know": the table was unreadable, or no
+        # adapter is up to carry a route. Reporting False here used to emit a
+        # confident "no default route" finding from an unmeasured fact.
+        has_default_route = None if gateways is None or not active_adapters else bool(gateway)
         return NetworkDiagnosis(
             len(adapters),
-            (None if gateways is None else bool(gateway)) if active_adapters else False,
+            has_default_route,
             dns,
             ping,
             proxy,

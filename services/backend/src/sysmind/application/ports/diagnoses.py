@@ -90,7 +90,8 @@ class DiagnosisRepository(Protocol):
         diagnosis_id: str,
         tool_name: str,
         tool_version: str,
-        arguments: dict[str, object],
+        # Already redacted for audit: raw tool arguments must never reach the repository.
+        redacted_arguments: dict[str, object],
         arguments_hash: str,
         started_at: str,
     ) -> None: ...

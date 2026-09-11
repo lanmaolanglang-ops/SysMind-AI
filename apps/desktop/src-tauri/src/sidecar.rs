@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -11,6 +12,10 @@ use uuid::Uuid;
 
 const EXPECTED_API_VERSION: &str = "1.0";
 const HANDSHAKE_PREFIX: &str = "SYSMIND_ENDPOINT ";
+/// The backend publishes its endpoint before the HTTP server starts serving. If it is
+/// alive but silent for longer than this, startup is treated as failed instead of
+/// blocking the reader thread forever.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BackendEndpoint {
@@ -183,21 +188,25 @@ impl BackendManager {
                 );
                 return;
             };
-            let mut endpoint = None;
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(parsed) = parse_handshake(&line) {
-                    endpoint = Some(parsed);
-                    break;
+            // Read stdout on a worker thread and forward each line over a channel so the
+            // handshake wait can enforce a wall-clock timeout. Without this a backend that
+            // starts but never prints its endpoint (deadlock, dependency stall, unflushed
+            // stdout) would block this thread forever and leave the UI spinning.
+            let (line_tx, line_rx) = mpsc::channel::<String>();
+            thread::spawn(move || {
+                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    if line_tx.send(line).is_err() {
+                        return;
+                    }
                 }
-            }
+            });
 
-            let Some(handshake) = endpoint else {
-                set_failure(
-                    &shared,
-                    generation,
-                    "Backend exited before publishing its local endpoint.".to_string(),
-                );
-                return;
+            let handshake = match await_handshake(&line_rx, HANDSHAKE_TIMEOUT) {
+                Ok(handshake) => handshake,
+                Err(message) => {
+                    set_failure(&shared, generation, message.to_string());
+                    return;
+                }
             };
             if let Some(error) = handshake_contract_error(&handshake) {
                 set_failure(&shared, generation, error);
@@ -254,10 +263,13 @@ impl BackendManager {
         }
 
         let mut runtime = lock_runtime(&self.runtime);
+        // Preserve any recorded error (e.g. an unexpected exit) instead of wiping the
+        // crash context; a clean shutdown simply keeps `None`.
+        let previous_error = runtime.snapshot.error.take();
         runtime.snapshot = BackendSnapshot {
             state: "disconnected",
             endpoint: None,
-            error: None,
+            error: previous_error,
         };
         #[cfg(windows)]
         {
@@ -337,6 +349,35 @@ fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>, generation: u64) {
 fn parse_handshake(line: &str) -> Option<EndpointHandshake> {
     let payload = line.strip_prefix(HANDSHAKE_PREFIX)?;
     serde_json::from_str(payload).ok()
+}
+
+/// Wait for the first parseable handshake line, bounded by `timeout`.
+///
+/// Returns `Err` with an operator-facing message when the stream ends first (the
+/// process exited) or when the deadline passes while the process is still silent.
+fn await_handshake(
+    lines: &mpsc::Receiver<String>,
+    timeout: Duration,
+) -> Result<EndpointHandshake, &'static str> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Err("Backend did not publish its local endpoint in time.");
+        };
+        match lines.recv_timeout(remaining) {
+            Ok(line) => {
+                if let Some(parsed) = parse_handshake(&line) {
+                    return Ok(parsed);
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                return Err("Backend did not publish its local endpoint in time.");
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err("Backend exited before publishing its local endpoint.");
+            }
+        }
+    }
 }
 
 /// Enforces the published sidecar handshake contract
@@ -420,7 +461,13 @@ fn send_http_request(
     let (headers, body) = response
         .split_once("\r\n\r\n")
         .ok_or_else(|| "Backend returned a malformed HTTP response.".to_string())?;
-    if !headers.starts_with("HTTP/1.1 200") {
+    // Parse the status line instead of prefix-matching it, so an unexpected status such
+    // as "HTTP/1.1 2000" or a different protocol version cannot be mistaken for success.
+    let status_line = headers.lines().next().unwrap_or_default();
+    let mut status_parts = status_line.split_whitespace();
+    let protocol_ok = matches!(status_parts.next(), Some("HTTP/1.1") | Some("HTTP/1.0"));
+    let code_ok = status_parts.next() == Some("200");
+    if !protocol_ok || !code_ok {
         return Err("Backend returned a non-success response.".to_string());
     }
     Ok(body.to_string())
@@ -433,6 +480,11 @@ struct LauncherCommand {
 
 impl LauncherCommand {
     fn resolve(app: &AppHandle) -> Result<Self, String> {
+        // Debug-only escape hatch for iterating on the backend: it lets a developer point
+        // the shell at an arbitrary interpreter. It must NOT be honoured in release builds,
+        // where a hostile process could preset the variable to launch an arbitrary binary
+        // and receive the session token.
+        #[cfg(debug_assertions)]
         if let Some(program) = std::env::var_os("SYSMIND_BACKEND_EXECUTABLE") {
             return Ok(Self {
                 program: PathBuf::from(program),
@@ -619,5 +671,44 @@ mod tests {
         let snapshot = lock_runtime(&runtime).snapshot.clone();
         assert_eq!(snapshot.state, "starting");
         assert!(snapshot.error.is_none());
+    }
+
+    #[test]
+    fn await_handshake_returns_first_parseable_line() {
+        let (tx, rx) = mpsc::channel();
+        tx.send("backend ready on port 4000".to_string()).unwrap();
+        tx.send(
+            r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#
+                .to_string(),
+        )
+        .unwrap();
+
+        let handshake = await_handshake(&rx, Duration::from_secs(1)).expect("handshake");
+        assert_eq!(handshake.port, 43123);
+    }
+
+    #[test]
+    fn await_handshake_times_out_when_backend_is_silent() {
+        let (_tx, rx) = mpsc::channel::<String>();
+
+        let result = await_handshake(&rx, Duration::from_millis(50));
+
+        assert_eq!(
+            result.err(),
+            Some("Backend did not publish its local endpoint in time.")
+        );
+    }
+
+    #[test]
+    fn await_handshake_reports_early_exit_when_stream_closes() {
+        let (tx, rx) = mpsc::channel::<String>();
+        drop(tx);
+
+        let result = await_handshake(&rx, Duration::from_secs(1));
+
+        assert_eq!(
+            result.err(),
+            Some("Backend exited before publishing its local endpoint.")
+        );
     }
 }
