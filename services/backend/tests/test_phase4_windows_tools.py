@@ -48,7 +48,7 @@ def test_network_diagnosis_uses_two_gateway_packets_and_accepts_one_reply(
     )
     monkeypatch.setattr(
         "sysmind.windows.platform_inspection._registry_default_gateways",
-        lambda: ("192.0.2.1",),
+        lambda: (("192.0.2.1",), ()),
     )
     counts: list[int] = []
 

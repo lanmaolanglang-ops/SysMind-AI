@@ -51,6 +51,11 @@ class NetworkDiagnosis:
     default_gateway: str | None = None
     gateway_reachable: bool | None = None
     public_reachable: bool | None = None
+    # IPv6 default route is tracked separately so "no IPv4 gateway" cannot be
+    # misread as "no network path" on an IPv6-only host.
+    default_gateway_ipv6: str | None = None
+    has_default_route_ipv4: bool | None = None
+    has_default_route_ipv6: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

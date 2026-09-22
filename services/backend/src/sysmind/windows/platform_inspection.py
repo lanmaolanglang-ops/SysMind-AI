@@ -5,7 +5,9 @@ import ipaddress
 import os
 import re
 import socket
+import subprocess
 import time
+import xml.etree.ElementTree as ET
 from ctypes import wintypes
 from pathlib import Path
 from threading import Event
@@ -159,36 +161,50 @@ def _registry_dns_servers() -> tuple[str, ...]:
     return tuple(sorted(found))[:8]
 
 
-def _registry_default_gateways() -> tuple[str, ...] | None:
+def _registry_default_gateways() -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Return ``(ipv4_gateways, ipv6_gateways)`` or ``None`` when unreadable.
+
+    Both the IPv4 (`Tcpip`) and IPv6 (`Tcpip6`) interface stores are consulted so
+    an IPv6-only default route is not reported as "no route".
+    """
     if os.name != "nt":
         return None
     import winreg
 
-    found: set[str] = set()
-    path = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as root:
-            for index in range(winreg.QueryInfoKey(root)[0]):
-                try:
-                    with winreg.OpenKey(root, winreg.EnumKey(root, index)) as interface:
-                        for name in ("DefaultGateway", "DhcpDefaultGateway"):
-                            try:
-                                raw, _ = winreg.QueryValueEx(interface, name)
-                            except OSError:
-                                continue
-                            values = raw if isinstance(raw, list) else str(raw).split()
-                            for value in values:
+    ipv4: set[str] = set()
+    ipv6: set[str] = set()
+    paths = (
+        (r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces", ipv4),
+        (r"SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces", ipv6),
+    )
+    unreadable = 0
+    for path, bucket in paths:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as root:
+                for index in range(winreg.QueryInfoKey(root)[0]):
+                    try:
+                        with winreg.OpenKey(root, winreg.EnumKey(root, index)) as interface:
+                            for name in ("DefaultGateway", "DhcpDefaultGateway"):
                                 try:
-                                    address = ipaddress.ip_address(str(value).strip())
-                                except ValueError:
+                                    raw, _ = winreg.QueryValueEx(interface, name)
+                                except OSError:
                                     continue
-                                if address.version == 4 and not address.is_unspecified:
-                                    found.add(str(address))
-                except OSError:
-                    continue
-    except OSError:
+                                values = raw if isinstance(raw, list) else str(raw).split()
+                                for value in values:
+                                    try:
+                                        address = ipaddress.ip_address(str(value).strip())
+                                    except ValueError:
+                                        continue
+                                    if address.is_unspecified:
+                                        continue
+                                    bucket.add(str(address))
+                    except OSError:
+                        continue
+        except OSError:
+            unreadable += 1
+    if unreadable == len(paths):
         return None
-    return tuple(sorted(found))
+    return tuple(sorted(ipv4)), tuple(sorted(ipv6))
 
 
 def _icmp_reply_succeeded(reply: Any) -> bool:
@@ -327,23 +343,44 @@ class WindowsNetworkProbe:
         stats = psutil.net_if_stats()
         active_adapters = [name for name in adapters if stats.get(name) and stats[name].isup]
         gateways = _registry_default_gateways()
-        gateway = gateways[0] if gateways else None
+        ipv4_gateways: tuple[str, ...] = ()
+        ipv6_gateways: tuple[str, ...] = ()
+        if gateways is None:
+            failures.append("default_route_unavailable")
+        else:
+            ipv4_gateways, ipv6_gateways = gateways
+        gateway = (
+            ipv4_gateways[0]
+            if ipv4_gateways
+            else (ipv6_gateways[0] if ipv6_gateways else None)
+        )
+        gateway_ipv6 = ipv6_gateways[0] if ipv6_gateways else None
         gateway_reachable: bool | None = None
-        if gateway is not None:
+        if gateway is not None and ":" not in gateway:
+            # ICMP echo here is IPv4-only; an IPv6 gateway must not be probed with it.
             try:
                 gateway_reachable = (
                     self._ping_ipv4(gateway, 2, 750, cancel_event).received > 0
                 )
             except ToolUnavailableError:
                 failures.append("gateway_icmp_unavailable")
-        elif gateways is None:
-            # The route table could not be read regardless of whether an adapter
-            # happens to be up, so the reason must be recorded either way.
-            failures.append("default_route_unavailable")
-        # Both of these mean "we do not know": the table was unreadable, or no
-        # adapter is up to carry a route. Reporting False here used to emit a
-        # confident "no default route" finding from an unmeasured fact.
-        has_default_route = None if gateways is None or not active_adapters else bool(gateway)
+        elif gateway is not None:
+            # IPv6 gateway present but not ICMP-probed: stay unknown rather than
+            # claiming reachability or failure from an unmeasured fact.
+            gateway_reachable = None
+        measured = gateways is not None
+        has_ipv4_route = bool(ipv4_gateways) if measured and active_adapters else (
+            False if measured and not active_adapters else None
+        )
+        has_ipv6_route = bool(ipv6_gateways) if measured and active_adapters else (
+            False if measured and not active_adapters else None
+        )
+        if has_ipv4_route is True or has_ipv6_route is True:
+            has_default_route: bool | None = True
+        elif has_ipv4_route is False and has_ipv6_route is False:
+            has_default_route = False
+        else:
+            has_default_route = None
         return NetworkDiagnosis(
             len(adapters),
             has_default_route,
@@ -355,7 +392,56 @@ class WindowsNetworkProbe:
             gateway,
             gateway_reachable,
             ping.received > 0 if ping is not None else None,
+            default_gateway_ipv6=gateway_ipv6,
+            has_default_route_ipv4=has_ipv4_route,
+            has_default_route_ipv6=has_ipv6_route,
         )
+
+
+def _scheduled_startup_task_paths() -> set[str] | None:
+    """Return Task Scheduler paths that are enabled startup (boot/logon) tasks.
+
+    Uses the system ``schtasks /Query /XML ONE`` collector (read-only, fixed argv).
+    Returns ``None`` when the collector is unavailable so callers fail closed and
+    do not promote every scheduled task into the startup inventory.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        completed = subprocess.run(
+            ["schtasks", "/Query", "/XML", "ONE"],
+            capture_output=True,
+            timeout=8,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        root = ET.fromstring(completed.stdout.decode("utf-8", errors="replace"))
+    except ET.ParseError:
+        return None
+    startup_tags = {"BootTrigger", "LogonTrigger", "SessionStateChangeTrigger"}
+    paths: set[str] = set()
+    for task in root.findall(".//Task"):
+        # Disabled tasks must not count as startup entries.
+        settings = task.find("Settings")
+        if settings is not None:
+            enabled = settings.findtext("Enabled")
+            if enabled is not None and enabled.strip().lower() == "false":
+                continue
+        registration = task.find("RegistrationInfo")
+        # schtasks XML uses URI-style Task elements; prefer the parent path text.
+        path_text = (registration.findtext("URI") if registration is not None else None) or ""
+        triggers = task.find("Triggers")
+        if triggers is None:
+            continue
+        kinds = {child.tag.split("}")[-1] for child in list(triggers)}
+        if kinds & startup_tags:
+            paths.add(path_text.strip())
+    return paths
 
 
 class WindowsStartupProbe:
@@ -424,8 +510,13 @@ class WindowsStartupProbe:
             except OSError:
                 continue
         task_cache = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree"
+        # Only boot/logon/startup-triggered, enabled tasks count as startup items.
+        # Unknown-trigger tasks are omitted (unknown ≠ safe), not silently included.
+        startup_task_paths = _scheduled_startup_task_paths()
+        trigger_unknown = 0
 
         def scheduled_tasks(key: Any, prefix: str = "", depth: int = 0) -> None:
+            nonlocal trigger_unknown
             if depth > 4 or len(items) >= 200:
                 return
             try:
@@ -441,17 +532,27 @@ class WindowsStartupProbe:
                             # Only real task leaves carry an Id; folder nodes in the
                             # Tree hierarchy must not be reported as startup items.
                             winreg.QueryValueEx(child, "Id")
-                            items.append(
-                                StartupItem(
-                                    path,
-                                    "scheduled_task",
-                                    "task_scheduler",
-                                    None,
-                                    item_id=startup_item_id("scheduled_task", path),
-                                )
-                            )
                         except OSError:
-                            pass
+                            scheduled_tasks(child, path, depth + 1)
+                            continue
+                        if startup_task_paths is None:
+                            trigger_unknown += 1
+                        elif (
+                            path not in startup_task_paths
+                            and f"\\{path}" not in startup_task_paths
+                        ):
+                            # Non-startup trigger (or disabled) — not a startup item.
+                            scheduled_tasks(child, path, depth + 1)
+                            continue
+                        items.append(
+                            StartupItem(
+                                path,
+                                "scheduled_task",
+                                "task_scheduler",
+                                None,
+                                item_id=startup_item_id("scheduled_task", path),
+                            )
+                        )
                         scheduled_tasks(child, path, depth + 1)
                 except OSError:
                     continue
@@ -465,24 +566,22 @@ class WindowsStartupProbe:
 
     def analyze(self) -> StartupAssessment:
         items = self.list_items()
+        observations = (
+            (
+                "Startup inventory is large."
+                if len(items) >= 20
+                else "Startup inventory is bounded."
+            ),
+            "High-impact startup entries require workload context and are not inferred here.",
+            "Unknown publisher or path is not treated as malicious.",
+        )
+        # Trigger-unknown scheduled tasks are omitted from the inventory rather
+        # than counted as startup items.
         return StartupAssessment(
             items,
             len(items),
-            # Inventory alone does not measure boot impact. Counting every entry
-            # without a resolved command line (all scheduled tasks) as "high impact"
-            # overstated the risk surface.
             0,
-            (
-                (
-                    "Startup inventory is large."
-                    if len(items) >= 20
-                    else "Startup inventory is bounded."
-                ),
-                "High-impact startup entries require workload context and are not inferred here.",
-                "Unknown publisher or path is not treated as malicious.",
-            ),
-            # Signature status is not probed in this read-only inventory; reporting
-            # every default "unavailable" entry as an unknown signature did the same.
+            observations,
             0,
         )
 
