@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.application.ports.scans import ScanRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.diagnostics import ScanRecord, ScanStatus, StepStatus
+from sysmind.infrastructure.database.cas import allowed_source_statuses
 from sysmind.infrastructure.database.models import ScanStepEvent, SystemScan
 
 _TERMINAL_STATUSES = frozenset({"completed", "partial", "cancelled", "failed"})
@@ -73,24 +76,49 @@ class SqlAlchemyScanRepository(ScanRepository):
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
         failures: Sequence[dict[str, str]] | None = None,
+        expected_statuses: Sequence[ScanStatus] | None = None,
     ) -> ScanRecord:
+        allowed = allowed_source_statuses(
+            target_status=status,
+            non_terminal=_NON_TERMINAL_STATUSES,
+            terminal=_TERMINAL_STATUSES,
+            expected=expected_statuses,
+        )
+        values: dict[str, object] = {
+            "status": status,
+            "progress": progress,
+            "current_step": current_step,
+            "finished_at": _parse_time(finished_at),
+        }
+        if summary is not None:
+            values["summary_json"] = json.dumps(summary, ensure_ascii=False)
+        if failures is not None:
+            values["failures_json"] = json.dumps(list(failures), ensure_ascii=False)
         with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(SystemScan)
+                    .where(SystemScan.id == scan_id, SystemScan.status.in_(allowed))
+                    .values(**values)
+                ),
+            )
             model = session.get(SystemScan, scan_id)
             if model is None:
                 raise KeyError(scan_id)
-            # Optimistic guard: never revive a terminal row with a non-terminal status
-            # (e.g. a late "running" write after cancel already finalized the scan).
-            if model.status in _TERMINAL_STATUSES and status in _NON_TERMINAL_STATUSES:
-                return _to_record(model)
-            model.status = status
-            model.progress = progress
-            model.current_step = current_step
-            model.finished_at = _parse_time(finished_at)
-            if summary is not None:
-                model.summary_json = json.dumps(summary, ensure_ascii=False)
-            if failures is not None:
-                model.failures_json = json.dumps(list(failures), ensure_ascii=False)
-        return _to_record(model)
+            if result.rowcount != 1 and (
+                expected_statuses is not None
+                or (status in _TERMINAL_STATUSES and model.status != status)
+            ):
+                # Progress writes that lose to a terminalizer are a silent no-op
+                # (they must not revive the row). Explicit CAS and competing
+                # terminal writes surface a conflict so exactly one winner sticks.
+                raise StateConflict(
+                    scan_id,
+                    expected=allowed,
+                    actual=model.status,
+                )
+            return _to_record(model)
 
     def add_step_event(
         self,

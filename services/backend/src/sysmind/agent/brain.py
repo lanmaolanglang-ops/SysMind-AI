@@ -19,6 +19,7 @@ from sysmind.agent.contracts import (
 )
 from sysmind.agent.memory import WorkingMemory, call_signature
 from sysmind.application.ports.agent_tasks import AgentTaskRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.agent_tasks import AgentEventType, AgentTaskRecord, AgentTaskStatus
 from sysmind.security.redaction import redact_arguments
 from sysmind.tools.executor import ToolExecutionResult, ToolExecutor, arguments_hash
@@ -99,16 +100,27 @@ class AgentBrain:
             action = response.action
             if action.type == "finalize":
                 output = (action.content or "Agent Runtime completed without output.")[:4000]
-                self._repository.update(
-                    task.id,
-                    status="completed",
-                    current_round=memory.rounds,
-                    tool_call_count=memory.tool_call_count,
-                    progress=100,
-                    working_summary=memory.snapshot(),
-                    finished_at=_now(),
-                    final_output=output,
-                )
+                try:
+                    self._repository.update(
+                        task.id,
+                        status="completed",
+                        current_round=memory.rounds,
+                        tool_call_count=memory.tool_call_count,
+                        progress=100,
+                        working_summary=memory.snapshot(),
+                        finished_at=_now(),
+                        final_output=output,
+                        expected_statuses=(
+                            "created",
+                            "planning",
+                            "running_tools",
+                            "analyzing",
+                            "cancelling",
+                        ),
+                    )
+                except StateConflict:
+                    # Cancel/timeout already finalized this task.
+                    return
                 self._event(
                     task.id,
                     "task.completed",
@@ -117,15 +129,25 @@ class AgentBrain:
                 return
             if action.type == "ask_user":
                 message = (action.content or "需要更多信息。")[:1000]
-                self._repository.update(
-                    task.id,
-                    status="waiting_user_input",
-                    current_round=memory.rounds,
-                    tool_call_count=memory.tool_call_count,
-                    progress=memory.rounds * 10,
-                    working_summary=memory.snapshot(),
-                    final_output=message,
-                )
+                try:
+                    self._repository.update(
+                        task.id,
+                        status="waiting_user_input",
+                        current_round=memory.rounds,
+                        tool_call_count=memory.tool_call_count,
+                        progress=memory.rounds * 10,
+                        working_summary=memory.snapshot(),
+                        final_output=message,
+                        expected_statuses=(
+                            "created",
+                            "planning",
+                            "running_tools",
+                            "analyzing",
+                            "cancelling",
+                        ),
+                    )
+                except StateConflict:
+                    return
                 self._event(
                     task.id,
                     "task.message",

@@ -20,6 +20,7 @@ from sysmind.agent.planning import (
     validate_plan,
 )
 from sysmind.application.ports.diagnoses import DiagnosisRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.diagnosis.hypotheses import HypothesisEngine
 from sysmind.diagnosis.planning import classify_question
 from sysmind.diagnosis.rules import build_findings
@@ -270,7 +271,18 @@ class DiagnosisCoordinator:
                     terminal_status="waiting_user_input",
                     created_at=_now(),
                 )
-                self._repository.wait_for_input(record.id, question=clarification)
+                try:
+                    self._repository.wait_for_input(record.id, question=clarification)
+                except StateConflict:
+                    # Cancel/timeout won while the plan was being written.
+                    log_event(
+                        _LOGGER,
+                        logging.INFO,
+                        "Diagnosis wait_for_input lost the state race.",
+                        component="diagnosis",
+                        event_type="diagnosis_state_conflict",
+                        diagnosis_id=record.id,
+                    )
                 return
             if plan.status == "complete":
                 break
@@ -518,13 +530,25 @@ class DiagnosisCoordinator:
             terminal_status=final_status,
             created_at=_now(),
         )
-        self._repository.complete(
-            record.id,
-            status=final_status,
-            report=report,
-            markdown=render_markdown(report, calls),
-            completed_at=_now(),
-        )
+        try:
+            self._repository.complete(
+                record.id,
+                status=final_status,
+                report=report,
+                markdown=render_markdown(report, calls),
+                completed_at=_now(),
+            )
+        except StateConflict:
+            # Cancel/timeout already finalized this diagnosis; keep their result.
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Diagnosis finalize lost the terminal-state race.",
+                component="diagnosis",
+                event_type="diagnosis_state_conflict",
+                diagnosis_id=record.id,
+                requested_status=final_status,
+            )
 
     def _persist_current_hypotheses(self, diagnosis_id: str) -> None:
         record = self._repository.get(diagnosis_id)
@@ -592,7 +616,13 @@ class DiagnosisCoordinator:
         message: str,
     ) -> None:
         current = self._repository.get(diagnosis_id)
-        if current is None or current.status in {"completed", "partial", "cancelled", "failed"}:
+        if current is None or current.status in {
+            "completed",
+            "partial",
+            "cancelled",
+            "failed",
+            "interrupted",
+        }:
             return
         timestamp = _now()
         self._repository.record_stop_reason(
@@ -602,13 +632,25 @@ class DiagnosisCoordinator:
             terminal_status=status,
             created_at=timestamp,
         )
-        self._repository.fail(
-            diagnosis_id,
-            status=status,
-            code=code,
-            message=message,
-            completed_at=timestamp,
-        )
+        try:
+            self._repository.fail(
+                diagnosis_id,
+                status=status,
+                code=code,
+                message=message,
+                completed_at=timestamp,
+            )
+        except StateConflict:
+            # A concurrent terminalizer already won (e.g. cancel vs timeout).
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Diagnosis already reached a terminal state.",
+                component="diagnosis",
+                event_type="diagnosis_state_conflict",
+                diagnosis_id=diagnosis_id,
+                requested_status=status,
+            )
 
     def _save_plan(
         self,

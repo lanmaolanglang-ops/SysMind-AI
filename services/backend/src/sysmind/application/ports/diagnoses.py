@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from sysmind.domain.diagnosis import (
@@ -27,8 +28,20 @@ class DiagnosisRepository(Protocol):
     def get(self, diagnosis_id: str) -> DiagnosisRecord | None: ...
     def recent(self, limit: int = 20) -> list[DiagnosisRecord]: ...
     def update_progress(
-        self, diagnosis_id: str, *, status: DiagnosisStatus, progress: int, current_step: str | None
-    ) -> None: ...
+        self,
+        diagnosis_id: str,
+        *,
+        status: DiagnosisStatus,
+        progress: int,
+        current_step: str | None,
+        expected_statuses: Sequence[DiagnosisStatus] | None = None,
+    ) -> None:
+        """Progress write with optional compare-and-set.
+
+        A non-terminal write never revives a terminal diagnosis. With
+        ``expected_statuses`` a mismatch raises ``StateConflict``.
+        """
+        ...
     def save_agent_plan(
         self,
         diagnosis_id: str,
@@ -57,7 +70,11 @@ class DiagnosisRepository(Protocol):
         data: dict[str, object],
         created_at: str,
     ) -> None: ...
-    def wait_for_input(self, diagnosis_id: str, *, question: str) -> DiagnosisRecord: ...
+    def wait_for_input(self, diagnosis_id: str, *, question: str) -> DiagnosisRecord:
+        """Pause for user input. Only valid from queued/running; raises
+        ``StateConflict`` otherwise.
+        """
+        ...
     def resume_with_input(
         self, diagnosis_id: str, *, input_text: str, created_at: str
     ) -> DiagnosisRecord | None: ...
@@ -86,7 +103,12 @@ class DiagnosisRepository(Protocol):
         report: DiagnosisReport,
         markdown: str,
         completed_at: str,
-    ) -> DiagnosisRecord: ...
+        expected_statuses: Sequence[DiagnosisStatus] | None = None,
+    ) -> DiagnosisRecord:
+        """Finalize with a report. Loses the race (``StateConflict``) if another
+        terminal status already won.
+        """
+        ...
     def fail(
         self,
         diagnosis_id: str,
@@ -95,7 +117,12 @@ class DiagnosisRepository(Protocol):
         code: str,
         message: str,
         completed_at: str,
-    ) -> DiagnosisRecord: ...
+        expected_statuses: Sequence[DiagnosisStatus] | None = None,
+    ) -> DiagnosisRecord:
+        """Finalize with a failure. Loses the race (``StateConflict``) if another
+        terminal status already won.
+        """
+        ...
     def create_tool_call(
         self,
         *,

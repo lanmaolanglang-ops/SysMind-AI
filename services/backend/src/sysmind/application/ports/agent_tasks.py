@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from sysmind.domain.agent_tasks import (
@@ -40,7 +41,16 @@ class AgentTaskRepository(Protocol):
         failure_code: str | None = None,
         failure_message: str | None = None,
         cancel_requested: bool | None = None,
-    ) -> AgentTaskRecord: ...
+        expected_statuses: Sequence[AgentTaskStatus] | None = None,
+    ) -> AgentTaskRecord:
+        """Compare-and-set update an agent task.
+
+        When ``expected_statuses`` is provided the write only succeeds if the
+        stored status is one of them; otherwise ``StateConflict`` is raised.
+        Without it, a non-terminal write cannot revive a terminal task, and a
+        terminal write cannot overwrite a *different* terminal status.
+        """
+        ...
 
     def request_cancel(self, task_id: str) -> AgentTaskRecord | None: ...
 

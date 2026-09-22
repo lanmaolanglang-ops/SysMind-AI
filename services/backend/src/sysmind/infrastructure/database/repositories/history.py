@@ -4,9 +4,9 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from statistics import median
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import delete, func, select, union_all
+from sqlalchemy import CursorResult, delete, func, select, union_all
 from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.domain.history import (
@@ -130,15 +130,31 @@ class SqlAlchemyHistoryRepository:
 
     def delete(self, kind: HistoryKind, record_id: str, revision: str) -> bool:
         with self._sessions.begin() as session:
+            # Recompute impact inside the same transaction as the delete so a
+            # concurrent dependency/protection change cannot expand the deletion
+            # set after the caller previewed it. The revision token is the CAS key.
             impact = self._impact(session, kind, record_id)
             if impact is None or not impact.deletable or impact.revision != revision:
                 return False
             if kind == "scan":
-                session.execute(delete(SystemScan).where(SystemScan.id == record_id))
+                result = cast(
+                    CursorResult[Any],
+                    session.execute(delete(SystemScan).where(SystemScan.id == record_id)),
+                )
             elif kind == "diagnosis":
-                session.execute(delete(Diagnosis).where(Diagnosis.id == record_id))
+                result = cast(
+                    CursorResult[Any],
+                    session.execute(delete(Diagnosis).where(Diagnosis.id == record_id)),
+                )
             else:
-                session.execute(delete(EventLogAnalysis).where(EventLogAnalysis.id == record_id))
+                result = cast(
+                    CursorResult[Any],
+                    session.execute(
+                        delete(EventLogAnalysis).where(EventLogAnalysis.id == record_id)
+                    ),
+                )
+            if result.rowcount != 1:
+                return False
             counts = {"scan": (1, 0, 0), "diagnosis": (0, 1, 0), "log": (0, 0, 1)}[kind]
             session.add(
                 DataCleanupRunModel(

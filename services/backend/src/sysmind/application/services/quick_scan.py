@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import uuid
@@ -11,6 +12,7 @@ from threading import Event
 from typing import Literal
 
 from sysmind.application.ports.scans import ScanRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.diagnostics import ScanRecord, StepStatus
 from sysmind.observability.logging import log_event
 from sysmind.tools.contracts import (
@@ -235,15 +237,31 @@ class QuickScanCoordinator:
             final_status = "partial"
         else:
             final_status = "completed"
-        self._repository.update(
-            scan_id,
-            status=final_status,
-            progress=100,
-            current_step=None,
-            finished_at=_now(),
-            summary=summary,
-            failures=failures,
-        )
+        try:
+            self._repository.update(
+                scan_id,
+                status=final_status,
+                progress=100,
+                current_step=None,
+                finished_at=_now(),
+                summary=summary,
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )
+        except StateConflict:
+            # Cancel already finalized the scan; keep its result and collected data.
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Quick scan finalize lost the terminal-state race.",
+                component="quick_scan",
+                event_type="scan_state_conflict",
+                correlation_id=correlation_id,
+                scan_id=scan_id,
+                requested_status=final_status,
+            )
+            self._cancellations.pop(scan_id, None)
+            return
         self._cancellations.pop(scan_id, None)
         log_event(
             _LOGGER,
@@ -276,22 +294,24 @@ class QuickScanCoordinator:
             cancellation.set()
             record = self._repository.get(scan_id)
             if record and record.status in {"queued", "running"}:
-                self._repository.update(
-                    scan_id,
-                    status="failed",
-                    progress=record.progress,
-                    current_step=None,
-                    finished_at=_now(),
-                    summary=record.summary or {},
-                    failures=[
-                        *record.failures,
-                        {
-                            "tool": "quick_scan",
-                            "code": "global_timeout",
-                            "message": "快速扫描达到 30 秒总预算，底层操作正在有界收尾。",
-                        },
-                    ],
-                )
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        scan_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=[
+                            *record.failures,
+                            {
+                                "tool": "quick_scan",
+                                "code": "global_timeout",
+                                "message": "快速扫描达到 30 秒总预算，底层操作正在有界收尾。",
+                            },
+                        ],
+                        expected_statuses=("queued", "running"),
+                    )
         except Exception as error:
             record = self._repository.get(scan_id)
             if record and record.status in {"queued", "running"}:
@@ -303,15 +323,17 @@ class QuickScanCoordinator:
                         "message": "扫描任务意外中断。",
                     },
                 ]
-                self._repository.update(
-                    scan_id,
-                    status="failed",
-                    progress=record.progress,
-                    current_step=None,
-                    finished_at=_now(),
-                    summary=record.summary or {},
-                    failures=failures,
-                )
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        scan_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=failures,
+                        expected_statuses=("queued", "running"),
+                    )
             log_event(
                 _LOGGER,
                 logging.ERROR,
@@ -332,15 +354,17 @@ class QuickScanCoordinator:
         failures: Sequence[dict[str, str]],
     ) -> None:
         current = self._repository.get(scan_id)
-        self._repository.update(
-            scan_id,
-            status="cancelled",
-            progress=current.progress if current else 0,
-            current_step=None,
-            finished_at=_now(),
-            summary=summary,
-            failures=failures,
-        )
+        with contextlib.suppress(StateConflict):
+            self._repository.update(
+                scan_id,
+                status="cancelled",
+                progress=current.progress if current else 0,
+                current_step=None,
+                finished_at=_now(),
+                summary=summary,
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )
         self._cancellations.pop(scan_id, None)
 
     def _record_event(

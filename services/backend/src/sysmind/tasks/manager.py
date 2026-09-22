@@ -11,6 +11,7 @@ from typing import cast
 from sysmind.agent.brain import AgentBrain, AgentRunError
 from sysmind.agent.contracts import AgentProvider, ToolDescriptor
 from sysmind.application.ports.agent_tasks import AgentTaskRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.agent_tasks import (
     AgentBudget,
     AgentTaskEvent,
@@ -227,18 +228,29 @@ class AgentTaskManager:
         if status not in {"cancelled", "failed", "timed_out"}:
             raise ValueError("Invalid terminal task status.")
         typed_status = cast(AgentTaskStatus, status)
-        self._repository.update(
-            current.id,
-            status=typed_status,
-            current_round=current.current_round,
-            tool_call_count=current.tool_call_count,
-            progress=current.progress,
-            working_summary=current.working_summary,
-            finished_at=_now(),
-            failure_code=code,
-            failure_message=message,
-            cancel_requested=current.cancel_requested,
-        )
+        try:
+            self._repository.update(
+                current.id,
+                status=typed_status,
+                current_round=current.current_round,
+                tool_call_count=current.tool_call_count,
+                progress=current.progress,
+                working_summary=current.working_summary,
+                finished_at=_now(),
+                failure_code=code,
+                failure_message=message,
+                cancel_requested=current.cancel_requested,
+                expected_statuses=(
+                    "created",
+                    "planning",
+                    "running_tools",
+                    "analyzing",
+                    "cancelling",
+                ),
+            )
+        except StateConflict:
+            # A concurrent terminalizer already won; keep its result.
+            return
         self._repository.append_event(
             current.id,
             "task.failed",

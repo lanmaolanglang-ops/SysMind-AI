@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.application.ports.diagnoses import DiagnosisRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.diagnosis import (
     DiagnosisCategory,
     DiagnosisHypothesis,
@@ -23,6 +26,7 @@ from sysmind.domain.diagnosis import (
     Severity,
     StopReason,
 )
+from sysmind.infrastructure.database.cas import allowed_source_statuses
 from sysmind.infrastructure.database.models import (
     AgentDecisionModel,
     AgentPlanModel,
@@ -44,6 +48,9 @@ DEFAULT_TOOL_VERSION = "1.0"
 _TERMINAL_STATUSES = frozenset(
     {"completed", "partial", "cancelled", "failed", "interrupted"}
 )
+_NON_TERMINAL_STATUSES = frozenset({"queued", "running", "waiting_user_input"})
+# ``waiting_user_input`` is resumable and must not be treated as terminal.
+_ACTIVE_STATUSES = frozenset({"queued", "running"})
 # A step that already reached one of these states must not be rewritten by a late finish.
 _TERMINAL_STEP_STATUSES = frozenset(
     {"completed", "failed", "cancelled", "timed_out", "skipped_duplicate"}
@@ -185,17 +192,34 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             return [_record(model) for model in session.scalars(statement)]
 
     def update_progress(
-        self, diagnosis_id: str, *, status: str, progress: int, current_step: str | None
+        self,
+        diagnosis_id: str,
+        *,
+        status: str,
+        progress: int,
+        current_step: str | None,
+        expected_statuses: Sequence[str] | None = None,
     ) -> None:
+        allowed = allowed_source_statuses(
+            target_status=status,
+            non_terminal=_NON_TERMINAL_STATUSES,
+            terminal=_TERMINAL_STATUSES,
+            expected=expected_statuses,
+        )
         with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(Diagnosis)
+                    .where(Diagnosis.id == diagnosis_id, Diagnosis.status.in_(allowed))
+                    .values(status=status, progress=progress, current_step=current_step)
+                ),
+            )
             model = session.get(Diagnosis, diagnosis_id)
             if model is None:
                 raise KeyError(diagnosis_id)
-            # CAS: a late progress write must not revive a terminal diagnosis
-            # (e.g. overwrite cancelled/failed after the run already stopped).
-            if model.status in _TERMINAL_STATUSES and status not in _TERMINAL_STATUSES:
-                return
-            model.status, model.progress, model.current_step = status, progress, current_step
+            if result.rowcount != 1 and expected_statuses is not None:
+                raise StateConflict(diagnosis_id, expected=allowed, actual=model.status)
 
     def save_agent_plan(
         self,
@@ -220,6 +244,8 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             # NOTE: agent_round_count tracks the planner/agent revision number (the value
             # the coordinator reads back as `revision`), not raw model rounds.
             diagnosis.agent_round_count = max(diagnosis.agent_round_count, revision)
+            # `reason` is canonical. `purpose` is a compatibility alias kept during the
+            # versioned plan-contract migration so existing desktop builds keep working.
             current_plan = [
                 {
                     "tool": step["tool"],
@@ -302,14 +328,27 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
 
     def wait_for_input(self, diagnosis_id: str, *, question: str) -> DiagnosisRecord:
         with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(Diagnosis)
+                    .where(
+                        Diagnosis.id == diagnosis_id,
+                        Diagnosis.status.in_(tuple(_ACTIVE_STATUSES)),
+                    )
+                    .values(status="waiting_user_input", clarification_question=question)
+                ),
+            )
             model = session.get(Diagnosis, diagnosis_id)
             if model is None:
                 raise KeyError(diagnosis_id)
-            model.status = "waiting_user_input"
-            # The pending question belongs in clarification_question; current_step keeps
-            # its own "what is happening now" meaning and must not be repurposed.
-            model.clarification_question = question
-        return _record(model)
+            if result.rowcount != 1:
+                raise StateConflict(
+                    diagnosis_id,
+                    expected=tuple(_ACTIVE_STATUSES),
+                    actual=model.status,
+                )
+            return _record(model)
 
     def resume_with_input(
         self, diagnosis_id: str, *, input_text: str, created_at: str
@@ -449,28 +488,78 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
         report: DiagnosisReport,
         markdown: str,
         completed_at: str,
+        expected_statuses: Sequence[str] | None = None,
     ) -> DiagnosisRecord:
+        allowed = allowed_source_statuses(
+            target_status=status,
+            non_terminal=_NON_TERMINAL_STATUSES,
+            terminal=_TERMINAL_STATUSES,
+            expected=expected_statuses,
+        )
         with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(Diagnosis)
+                    .where(Diagnosis.id == diagnosis_id, Diagnosis.status.in_(allowed))
+                    .values(
+                        status=status,
+                        progress=100,
+                        current_step=None,
+                        report_json=json.dumps(asdict(report), ensure_ascii=False),
+                        report_markdown=markdown,
+                        completed_at=datetime.fromisoformat(completed_at),
+                    )
+                ),
+            )
             model = session.get(Diagnosis, diagnosis_id)
             if model is None:
                 raise KeyError(diagnosis_id)
-            model.status, model.progress, model.current_step = status, 100, None
-            model.report_json = json.dumps(asdict(report), ensure_ascii=False)
-            model.report_markdown = markdown
-            model.completed_at = datetime.fromisoformat(completed_at)
-        return _record(model)
+            if result.rowcount != 1 and (
+                expected_statuses is not None or model.status != status
+            ):
+                raise StateConflict(diagnosis_id, expected=allowed, actual=model.status)
+            return _record(model)
 
     def fail(
-        self, diagnosis_id: str, *, status: str, code: str, message: str, completed_at: str
+        self,
+        diagnosis_id: str,
+        *,
+        status: str,
+        code: str,
+        message: str,
+        completed_at: str,
+        expected_statuses: Sequence[str] | None = None,
     ) -> DiagnosisRecord:
+        allowed = allowed_source_statuses(
+            target_status=status,
+            non_terminal=_NON_TERMINAL_STATUSES,
+            terminal=_TERMINAL_STATUSES,
+            expected=expected_statuses,
+        )
         with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(Diagnosis)
+                    .where(Diagnosis.id == diagnosis_id, Diagnosis.status.in_(allowed))
+                    .values(
+                        status=status,
+                        failure_code=code,
+                        failure_message=message,
+                        current_step=None,
+                        completed_at=datetime.fromisoformat(completed_at),
+                    )
+                ),
+            )
             model = session.get(Diagnosis, diagnosis_id)
             if model is None:
                 raise KeyError(diagnosis_id)
-            model.status, model.failure_code, model.failure_message = status, code, message
-            model.current_step = None
-            model.completed_at = datetime.fromisoformat(completed_at)
-        return _record(model)
+            if result.rowcount != 1 and (
+                expected_statuses is not None or model.status != status
+            ):
+                raise StateConflict(diagnosis_id, expected=allowed, actual=model.status)
+            return _record(model)
 
     def create_tool_call(
         self,

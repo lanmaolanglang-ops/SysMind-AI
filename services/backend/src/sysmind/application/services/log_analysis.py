@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -13,6 +14,7 @@ from threading import Event
 from typing import cast, get_args
 
 from sysmind.application.ports.log_analyses import LogAnalysisRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.diagnostics import StepStatus
 from sysmind.domain.event_logs import (
     MAX_EVENTS,
@@ -290,15 +292,29 @@ class LogAnalysisCoordinator:
         final_status: AnalysisStatus = "partial" if failures else "completed"
         if failures and not typed_events:
             final_status = "failed"
-        self._repository.update(
-            analysis_id,
-            status=final_status,
-            progress=100,
-            current_step=None,
-            finished_at=_now(),
-            summary=summary,
-            failures=failures,
-        )
+        try:
+            self._repository.update(
+                analysis_id,
+                status=final_status,
+                progress=100,
+                current_step=None,
+                finished_at=_now(),
+                summary=summary,
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )
+        except StateConflict:
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Log analysis finalize lost the terminal-state race.",
+                component="log_analysis",
+                event_type="analysis_state_conflict",
+                correlation_id=correlation_id,
+                analysis_id=analysis_id,
+                requested_status=final_status,
+            )
+            return
         log_event(
             _LOGGER,
             logging.INFO,
@@ -394,41 +410,45 @@ class LogAnalysisCoordinator:
             cancellation.set()
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:
-                self._repository.update(
-                    analysis_id,
-                    status="failed",
-                    progress=record.progress,
-                    current_step=None,
-                    finished_at=_now(),
-                    summary=record.summary or {},
-                    failures=[
-                        *record.failures,
-                        {
-                            "tool": "log_analysis",
-                            "code": "global_timeout",
-                            "message": "日志分析达到 30 秒总预算，底层操作正在有界收尾。",
-                        },
-                    ],
-                )
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        analysis_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=[
+                            *record.failures,
+                            {
+                                "tool": "log_analysis",
+                                "code": "global_timeout",
+                                "message": "日志分析达到 30 秒总预算，底层操作正在有界收尾。",
+                            },
+                        ],
+                        expected_statuses=("queued", "running"),
+                    )
         except Exception as error:
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:
-                self._repository.update(
-                    analysis_id,
-                    status="failed",
-                    progress=record.progress,
-                    current_step=None,
-                    finished_at=_now(),
-                    summary=record.summary or {},
-                    failures=[
-                        *record.failures,
-                        {
-                            "tool": record.current_step or "log_analysis",
-                            "code": "analysis_failed",
-                            "message": "日志分析任务意外中断。",
-                        },
-                    ],
-                )
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        analysis_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=[
+                            *record.failures,
+                            {
+                                "tool": record.current_step or "log_analysis",
+                                "code": "analysis_failed",
+                                "message": "日志分析任务意外中断。",
+                            },
+                        ],
+                        expected_statuses=("queued", "running"),
+                    )
             log_event(
                 _LOGGER,
                 logging.ERROR,
@@ -454,18 +474,20 @@ class LogAnalysisCoordinator:
         retained_events = sorted(events, key=lambda item: item.timestamp, reverse=True)[
             :max_events
         ]
-        self._repository.update(
-            analysis_id,
-            status="cancelled",
-            progress=current.progress if current else 0,
-            current_step=None,
-            finished_at=_now(),
-            summary={
-                "event_count": len(retained_events),
-                "events": [asdict(item) for item in retained_events],
-                "event_groups": [],
-                "crash_groups": [],
-                "notice": "分析已取消；仅保留取消前在本地归一化并脱敏的事件。",
-            },
-            failures=failures,
-        )
+        with contextlib.suppress(StateConflict):
+            self._repository.update(
+                analysis_id,
+                status="cancelled",
+                progress=current.progress if current else 0,
+                current_step=None,
+                finished_at=_now(),
+                summary={
+                    "event_count": len(retained_events),
+                    "events": [asdict(item) for item in retained_events],
+                    "event_groups": [],
+                    "crash_groups": [],
+                    "notice": "分析已取消；仅保留取消前在本地归一化并脱敏的事件。",
+                },
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )

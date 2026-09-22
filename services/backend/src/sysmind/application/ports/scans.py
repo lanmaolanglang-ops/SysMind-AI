@@ -19,11 +19,18 @@ class ScanRepository(Protocol):
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
         failures: Sequence[dict[str, str]] | None = None,
+        expected_statuses: Sequence[ScanStatus] | None = None,
     ) -> ScanRecord:
-        """Update a scan.
+        """Compare-and-set update a scan.
 
         ``failures=None`` means "leave the stored failures unchanged"; pass a
         sequence (possibly empty) to replace them.
+
+        When ``expected_statuses`` is provided the write only succeeds if the
+        stored status is one of them; otherwise
+        ``sysmind.application.ports.state_conflict.StateConflict`` is raised.
+        Without it, a non-terminal write cannot revive a terminal scan, and a
+        terminal write cannot overwrite a *different* terminal status.
         """
         ...
 
