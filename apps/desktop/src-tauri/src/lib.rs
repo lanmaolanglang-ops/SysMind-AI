@@ -1,6 +1,9 @@
+mod generated_version;
 mod sidecar;
 
 use sidecar::{BackendManager, BackendSnapshot};
+use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{Manager, RunEvent};
 
 #[tauri::command]
@@ -12,10 +15,29 @@ fn backend_status(manager: tauri::State<'_, BackendManager>) -> BackendSnapshot 
 fn restart_backend(
     app: tauri::AppHandle,
     manager: tauri::State<'_, BackendManager>,
-) -> BackendSnapshot {
+) -> Result<BackendSnapshot, String> {
     manager.shutdown();
     manager.start(&app);
-    manager.snapshot()
+    // Startup is asynchronous. A snapshot still in `starting` is not a finished
+    // restart, so never report success from that state.
+    let deadline = Instant::now() + Duration::from_secs(25);
+    loop {
+        let snapshot = manager.snapshot();
+        match snapshot.state {
+            "starting" => {
+                if Instant::now() >= deadline {
+                    return Err("Backend restart is still starting.".to_string());
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            "connected" => return Ok(snapshot),
+            _ => {
+                return Err(snapshot
+                    .error
+                    .unwrap_or_else(|| "Backend restart failed.".to_string()));
+            }
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,10 +60,21 @@ pub fn run() {
             state.start(&handle);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Closing the last window must tear down the sidecar even if the
+            // event loop later hangs or only emits Exit after a delay. Shutdown
+            // is idempotent, so the RunEvent::Exit path remains safe.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                window.app_handle().state::<BackendManager>().shutdown();
+            }
+        })
         .invoke_handler(tauri::generate_handler![backend_status, restart_backend])
         .build(tauri::generate_context!())
         .expect("failed to build SysMind AI desktop")
         .run(|app_handle, event| {
+            // ExitRequested can be prevented (e.g. by the updater). Tear down
+            // the sidecar for both ExitRequested and Exit so a late/prevented
+            // path cannot leave an orphan backend. Shutdown is idempotent.
             if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
                 app_handle.state::<BackendManager>().shutdown();
             }

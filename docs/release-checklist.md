@@ -3,7 +3,7 @@
 No build is a production release until every required item below has evidence attached to the draft
 release. Unsigned local installers are development artifacts.
 
-## Current preflight evidence (2026-08-20)
+## Current preflight evidence (2026-08-23)
 
 - [x] Frozen backend process contract and migration-to-head smoke test passed.
 - [x] Packaged desktop portable lifecycle passed: loopback readiness, no token in arguments,
@@ -13,6 +13,11 @@ release. Unsigned local installers are development artifacts.
 - [x] GitHub-hosted Windows CI passed backend, frontend, frozen-backend/Rust smoke, unsigned NSIS
   packaging, portable lifecycle, and the dual-gated silent install/launch/uninstall-preserve flow on
   commit `0e9d5ec`.
+- [x] RC2 exercised the final unsigned Local Validation Build on one Windows 11 x64 device: real
+  read-only diagnosis tools, fresh-data startup, bundled-backend lifecycle, single instance, forced
+  backend failure visibility, silent install, and data-preserving silent uninstall.
+- [x] RC2 quality gates recorded backend 145 passed / 4 isolated state-change tests skipped,
+  frontend 34 passed, Rust 5 passed, and Alembic head `0010_phase32`.
 - [ ] The current Windows 11 Home workstation still has no Windows Sandbox. Phase 5 state-changing
   checks and the remaining manual release matrix below must use a disposable VM or equivalent
   isolated runner; do not substitute the normal workstation.
@@ -52,7 +57,7 @@ release. Unsigned local installers are development artifacts.
   history and action audit records.
 - [ ] Update with a bad signature is rejected; offline/timeout update checks leave the current version
   usable.
-- [ ] Silent uninstall preserves `%LOCALAPPDATA%\\ai.sysmind.desktop`; interactive uninstall verifies
+- [ ] Silent uninstall preserves `%LOCALAPPDATA%\ai.sysmind.desktop`; interactive uninstall verifies
   both “preserve” and explicit “delete” choices from a VM snapshot.
 - [ ] Phase 5 isolated startup and process-action tests pass in a disposable VM; never run them on a
   normal workstation.

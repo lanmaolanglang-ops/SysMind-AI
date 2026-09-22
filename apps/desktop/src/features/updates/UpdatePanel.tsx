@@ -14,7 +14,13 @@ type UpdateState =
   | { kind: "installing"; version: string }
   | { kind: "error"; message: string };
 
-export function UpdatePanel() {
+export function UpdatePanel({
+  updaterAvailable =
+    import.meta.env.VITE_SYSMIND_UPDATER_AVAILABLE === "true" ||
+    import.meta.env.MODE === "test",
+}: {
+  updaterAvailable?: boolean;
+}) {
   const [version, setVersion] = useState("—");
   const [state, setState] = useState<UpdateState>({ kind: "idle" });
 
@@ -48,7 +54,13 @@ export function UpdatePanel() {
   async function install(update: AvailableUpdate) {
     setState({ kind: "installing", version: update.version });
     try {
-      await update.install();
+      const result = await update.install();
+      if (result?.relaunched === false) {
+        setState({
+          kind: "error",
+          message: "更新已安装成功，但应用未能自动重启。请手动重启应用以完成更新。",
+        });
+      }
     } catch {
       setState({
         kind: "error",
@@ -79,8 +91,17 @@ export function UpdatePanel() {
             安装并重启
           </button>
         ) : (
-          <button type="button" onClick={() => void checkForUpdates()} disabled={busy}>
-            {state.kind === "checking" ? "正在检查…" : "检查更新"}
+          <button
+            type="button"
+            onClick={() => void checkForUpdates()}
+            disabled={busy || !updaterAvailable}
+            title={updaterAvailable ? undefined : "开发构建未配置签名更新器"}
+          >
+            {state.kind === "checking"
+              ? "正在检查…"
+              : updaterAvailable
+                ? "检查更新"
+                : "开发构建不提供更新"}
           </button>
         )}
       </div>

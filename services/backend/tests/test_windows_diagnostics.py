@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,30 +15,116 @@ from sysmind.core.config import Settings
 from sysmind.windows.diagnostics import (
     WindowsProcessProbe,
     WindowsSystemProbe,
-    _normalized_cpu_percent,
+    normalized_cpu_percent,
 )
 
 
 def test_process_cpu_is_normalized_to_whole_machine_percentage() -> None:
-    assert _normalized_cpu_percent(1600.0, logical_cores=32) == 50.0
-    assert _normalized_cpu_percent(6400.0, logical_cores=32) == 100.0
+    assert normalized_cpu_percent(1600.0, logical_cores=32) == 50.0
+    assert normalized_cpu_percent(6400.0, logical_cores=32) == 100.0
 
 
 def test_gpu_parser_uses_fixed_application_command(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert command[-1].startswith("Get-CimInstance Win32_VideoController")
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            '[{"Name":"Fixture GPU","AdapterRAM":4096,"DriverVersion":"9.1"}]',
-            "",
-        )
+        if "Get-CimInstance" in command[-1]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                '[{"Name":"Fixture GPU","AdapterRAM":4096,"DriverVersion":"9.1"}]',
+                "",
+            )
+        # The telemetry probe is best-effort; a failing counter query must not
+        # take the metadata with it.
+        return subprocess.CompletedProcess(command, 1, "", "counters unavailable")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     result = WindowsSystemProbe(powershell_path="powershell.exe").gpus()
 
     assert result[0].name == "Fixture GPU"
     assert result[0].memory_bytes == 4096
+    assert result[0].telemetry_available is False
+
+
+def test_gpu_telemetry_is_attached_to_the_first_adapter_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "Get-CimInstance" in command[-1]:
+            payload = (
+                '[{"Name":"Discrete","AdapterRAM":4096},'
+                '{"Name":"Integrated","AdapterRAM":2048}]'
+            )
+            return subprocess.CompletedProcess(command, 0, payload, "")
+        return subprocess.CompletedProcess(
+            command, 0, '[{"a":"luid_a_phys_0|3d","t":"e","v":42.0},'
+            '{"a":"luid_a_phys_0","t":"m","v":1073741824}]', ""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    result = WindowsSystemProbe(powershell_path="powershell.exe").gpus()
+
+    assert result[0].telemetry_available is True
+    assert result[0].utilization_percent == 42.0
+    assert result[0].memory_used_bytes == 1073741824
+    assert result[0].telemetry_scope == "system"
+    # Counters are keyed by LUID, so the second adapter must not claim a reading.
+    assert result[1].telemetry_available is False
+    assert result[1].utilization_percent is None
+
+
+def test_gpu_parser_normalizes_unknown_memory_and_invalid_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [], 0, '{"Name":"Fixture GPU","AdapterRAM":4294967295}', ""
+        ),
+    )
+    assert WindowsSystemProbe(powershell_path="powershell.exe").gpus()[0].memory_bytes is None
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "not-json", ""),
+    )
+    with pytest.raises(Exception, match="invalid GPU information"):
+        WindowsSystemProbe(powershell_path="powershell.exe").gpus()
+
+
+def test_process_snapshot_primes_all_processes_before_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 42
+
+        def cpu_percent(self, interval: object = None) -> float:
+            calls.append((self.pid, len(calls)))
+            return 0.0 if len(calls) == 1 else 320.0
+
+        def memory_info(self) -> object:
+            return SimpleNamespace(rss=1024)
+
+        def memory_percent(self) -> float:
+            return 1.0
+
+        def create_time(self) -> float:
+            return 100.0
+
+        def name(self) -> str:
+            return "busy.exe"
+
+    monkeypatch.setattr("sysmind.windows.diagnostics.psutil.process_iter", lambda: [FakeProcess()])
+    monkeypatch.setattr("sysmind.windows.diagnostics.psutil.cpu_count", lambda logical=True: 8)
+
+    result = WindowsProcessProbe().snapshot(sample_seconds=0)
+
+    assert len(calls) == 2
+    assert result[0].cpu_percent == 40.0
+    assert result[0].item_id is not None
 
 
 @pytest.mark.windows_smoke
@@ -75,3 +162,63 @@ def test_windows_quick_scan_api_smoke(tmp_path: Path) -> None:
     assert payload["summary"]["operating_system"]["name"] == "Windows"
     assert payload["summary"]["cpu"]["logical_cores"] > 0
     assert payload["summary"]["memory"]["total_bytes"] > 0
+
+
+def test_basename_survives_unquoted_paths_with_spaces() -> None:
+    """Registry command lines are often stored unquoted even when they contain spaces.
+
+    Splitting on the first space truncated "C:/Program Files/App/app.exe" down to
+    "C:/Program", so the display name was meaningless.
+    """
+    from sysmind.windows.platform_inspection import _basename
+
+    assert _basename('"C:/Program Files/App/app.exe" --minimised') == "app.exe"
+    assert _basename("C:/Program Files/App/app.exe --minimised") == "app.exe"
+    assert _basename("C:/Program Files/App/app.exe") == "app.exe"
+    assert _basename("C:/Program Files/App/launcher.cmd --silent") == "launcher.cmd"
+    assert _basename("C:/Program Files/App/app.exe") == "app.exe"
+    assert _basename("   ") is None
+
+
+def test_gpu_telemetry_summarises_the_busiest_adapter_and_total_memory() -> None:
+    from sysmind.windows.diagnostics import _summarize_gpu_telemetry
+
+    rows = [
+        {"a": "luid_a_phys_0|3d", "t": "e", "v": 40.0},
+        {"a": "luid_a_phys_0|copy", "t": "e", "v": 5.5},
+        {"a": "luid_b_phys_0|3d", "t": "e", "v": 12.0},
+        {"a": "luid_a_phys_0", "t": "m", "v": 1_500_000_000},
+        {"a": "luid_b_phys_0", "t": "m", "v": 250_000_000},
+    ]
+
+    assert _summarize_gpu_telemetry(rows) == (45.5, 1_750_000_000)
+
+
+def test_gpu_telemetry_caps_utilization_at_one_hundred() -> None:
+    from sysmind.windows.diagnostics import _summarize_gpu_telemetry
+
+    rows = [
+        {"a": "luid_a_phys_0|3d", "t": "e", "v": 90.0},
+        {"a": "luid_a_phys_0|videoencode", "t": "e", "v": 80.0},
+    ]
+
+    assert _summarize_gpu_telemetry(rows) == (100.0, None)
+
+
+def test_gpu_telemetry_ignores_unusable_rows() -> None:
+    from sysmind.windows.diagnostics import _summarize_gpu_telemetry
+
+    assert _summarize_gpu_telemetry([]) is None
+    assert _summarize_gpu_telemetry([{"a": None, "t": "e", "v": 1}]) is None
+    assert _summarize_gpu_telemetry([{"a": "x_phys_0", "t": "e", "v": "high"}]) is None
+    assert _summarize_gpu_telemetry([{"a": "x_phys_0", "t": "?", "v": 5}]) is None
+
+
+def test_recovery_entry_name_rejects_path_and_wildcard_characters() -> None:
+    from sysmind.application.ports.actions import TargetChangedError
+    from sysmind.windows.startup_actions import _require_safe_entry_name
+
+    assert _require_safe_entry_name("OneDrive") == "OneDrive"
+    for rejected in ("..\\evil", "nested/name", "name:stream", 'quo"te', "wild*", "", "x" * 256):
+        with pytest.raises(TargetChangedError):
+            _require_safe_entry_name(rejected)

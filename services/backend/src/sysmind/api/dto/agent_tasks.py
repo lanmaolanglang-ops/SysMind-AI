@@ -42,6 +42,11 @@ class StartAgentTaskRequest(BaseModel):
     def unique_tools(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)):
             raise ValueError("duplicate tools are not allowed")
+        for name in value:
+            if not name.strip():
+                raise ValueError("tool names must not be blank")
+            if len(name) > 110:
+                raise ValueError("tool names are limited to 110 characters")
         return value
 
 

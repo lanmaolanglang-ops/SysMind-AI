@@ -28,10 +28,9 @@ when either signing mechanism is unavailable. Windows signs the frozen backend b
 then Tauri signs the desktop executable and installer. Unsigned local packages are development
 artifacts and cannot be promoted as releases.
 
-Uninstall preserves `%LOCALAPPDATA%\\ai.sysmind.desktop` by default. Tauri's interactive uninstaller
+Uninstall preserves `%LOCALAPPDATA%\ai.sysmind.desktop` by default. Tauri's interactive uninstaller
 offers a separate opt-in deletion checkbox; silent uninstall and updater-driven replacement preserve it. Normal
-startup runs all pending Alembic migrations. Downgrades are unsupported because migration history is
-forward-only for releases.
+startup runs all pending Alembic migrations. Migration scripts implement downgrade and the round trip is tested; release recovery policy is still forward-only.
 
 The GitHub release workflow builds only from an explicit version tag, runs the ordinary quality
 gates, creates the frozen backend and NSIS/update artifacts, and uploads them without ever writing

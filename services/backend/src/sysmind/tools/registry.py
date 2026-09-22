@@ -4,11 +4,11 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from threading import Event
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, get_args
 
 from pydantic import BaseModel, TypeAdapter
 
-from sysmind.agent.contracts import ToolDescriptor
+from sysmind.tools.contracts import ToolDescriptor
 
 RiskLevel: TypeAlias = Literal["read_only", "network", "state_change", "destructive"]
 ConfirmationPolicy: TypeAlias = Literal["none", "each_time", "double"]
@@ -16,7 +16,10 @@ ToolHandler: TypeAlias = Callable[[BaseModel, Event], object]
 ToolSummarizer: TypeAlias = Callable[[object], dict[str, object]]
 
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_.]{2,79}$")
-_VERSION_PATTERN = re.compile(r"^[1-9]\d*\.\d+$")
+# Accept both "1.0" and "1.0.0" style versions.
+_VERSION_PATTERN = re.compile(r"^[1-9]\d*\.\d+(?:\.\d+)?$")
+_RISK_LEVELS = frozenset(get_args(RiskLevel))
+_CONFIRMATION_POLICIES = frozenset(get_args(ConfirmationPolicy))
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +72,13 @@ class ToolRegistry:
             raise ToolRegistryError("Tool description must not be empty.")
         if not 0 < definition.timeout_seconds <= 60:
             raise ToolRegistryError("Tool timeout must be between 0 and 60 seconds.")
+        # Literal aliases are not enforced at runtime by dataclasses; check the enums here.
+        if definition.risk_level not in _RISK_LEVELS:
+            raise ToolRegistryError(f"Invalid risk level: {definition.risk_level}")
+        if definition.confirmation_policy not in _CONFIRMATION_POLICIES:
+            raise ToolRegistryError(
+                f"Invalid confirmation policy: {definition.confirmation_policy}"
+            )
         if not callable(definition.handler) or not callable(definition.summarizer):
             raise ToolRegistryError("Tool handler and summarizer must be callable.")
         input_schema = definition.input_model.model_json_schema()

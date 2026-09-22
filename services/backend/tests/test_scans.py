@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from threading import Event
 
 import pytest
@@ -28,8 +29,8 @@ from sysmind.infrastructure.database import (
 )
 from sysmind.infrastructure.database.repositories import SqlAlchemyScanRepository
 from sysmind.tools.contracts import ToolCancelledError, ToolSpec, ToolUnavailableError
-from sysmind.tools.process import ProcessTools
-from sysmind.tools.system import SystemTools
+from sysmind.tools.process import PROCESS_TOOL_SPECS, ProcessTools
+from sysmind.tools.system import SYSTEM_TOOL_SPECS, SystemTools
 
 
 class FixtureSystemProbe:
@@ -64,7 +65,10 @@ class SlowCpuProbe(FixtureSystemProbe):
 
 
 class FixtureProcessProbe:
-    def snapshot(self, limit: int = 200) -> Sequence[ProcessInfo]:
+    def snapshot(
+        self, limit: int = 200, cancel_event: Event | None = None
+    ) -> Sequence[ProcessInfo]:
+        del limit, cancel_event
         return (ProcessInfo(42, "fixture.exe", 2.0, 2_000, 1.0),)
 
     def high_usage(
@@ -143,7 +147,9 @@ def test_quick_scan_collects_versioned_read_only_snapshot(
             {"scan_id": payload["id"]},
         ).scalar_one()
     engine.dispose()
-    assert audit_count == 7
+    # One audit row per versioned step; derive the count instead of hardcoding it so adding
+    # a tool spec does not break this test.
+    assert audit_count == len(SYSTEM_TOOL_SPECS) + len(PROCESS_TOOL_SPECS)
 
 
 def test_quick_scan_preserves_partial_results_when_capability_is_unavailable(
@@ -234,3 +240,28 @@ def test_startup_marks_orphaned_scan_as_failed(
 
     assert payload["status"] == "failed"
     assert payload["failures"][0]["code"] == "backend_restarted"
+
+
+@pytest.mark.anyio
+async def test_startup_marks_interrupted_scan_without_replay(settings: Settings) -> None:
+    """Interrupted scans must terminate (PRD/ADR), not silently re-run."""
+    run_migrations(settings.database_url)
+    repository = SqlAlchemyScanRepository(create_session_factory(settings.database_url))
+    repository.create("interrupted-scan", datetime.now(UTC).isoformat(), "1.0")
+    repository.update(
+        "interrupted-scan", status="running", progress=10, current_step="system.gpu"
+    )
+    coordinator = QuickScanCoordinator(
+        repository,
+        SystemTools(FixtureSystemProbe()),
+        ProcessTools(FixtureProcessProbe()),
+    )
+
+    assert coordinator.recover_interrupted() == 1
+
+    record = repository.get("interrupted-scan")
+    assert record is not None
+    assert record.status == "failed"
+    assert any(failure.get("code") == "backend_restarted" for failure in record.failures)
+    # Must not restart collection in the background.
+    assert coordinator._tasks == {}  # noqa: SLF001

@@ -21,16 +21,34 @@ class IssuedConsent:
 
 
 class ConsentService:
+    # Upper bound on any consent ticket lifetime so a caller cannot hand out a
+    # long-lived authorization by inflating ttl_seconds.
+    MAX_TTL_SECONDS = 300
+
     def __init__(self, session_binding: str, *, ttl_seconds: int = 120) -> None:
         self._key = secrets.token_bytes(32)
         self._session = hashlib.sha256(session_binding.encode()).hexdigest()
-        self._ttl = ttl_seconds
+        self._ttl = min(max(1, ttl_seconds), self.MAX_TTL_SECONDS)
+
+    @property
+    def ttl_seconds(self) -> int:
+        return self._ttl
 
     def issue(
-        self, action_id: str, tool_name: str, target_id: str, observed_revision: str
+        self,
+        action_id: str,
+        tool_name: str,
+        target_id: str,
+        observed_revision: str,
+        *,
+        ttl_seconds: int | None = None,
     ) -> IssuedConsent:
         now = datetime.now(UTC)
-        expires = now + timedelta(seconds=self._ttl)
+        # A shorter per-issue TTL keeps the advertised ticket expiry honest when the
+        # action plan itself has a tighter, action-specific window. Always capped.
+        effective_ttl = self._ttl if ttl_seconds is None else max(1, ttl_seconds)
+        effective_ttl = min(effective_ttl, self.MAX_TTL_SECONDS)
+        expires = now + timedelta(seconds=effective_ttl)
         payload = {
             "action_id": action_id,
             "tool": tool_name,
@@ -60,12 +78,18 @@ class ConsentService:
             payload = json.loads(base64.urlsafe_b64decode(encoded.encode()))
         except (ValueError, json.JSONDecodeError) as error:
             raise ConsentError("Consent ticket is invalid.") from error
+        if not isinstance(payload, dict):
+            raise ConsentError("Consent ticket is invalid.")
         if payload.get("action_id") != action_id or payload.get("tool") != tool_name:
             raise ConsentError("Consent ticket does not match this action.")
         if payload.get("target_hash") != hashlib.sha256(target_id.encode()).hexdigest():
             raise ConsentError("Consent ticket target was changed.")
         if payload.get("revision") != observed_revision or payload.get("session") != self._session:
             raise ConsentError("Consent ticket context was changed.")
-        if int(payload.get("exp", 0)) < int(datetime.now(UTC).timestamp()):
+        try:
+            expires_at = int(payload.get("exp", 0))
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ConsentError("Consent ticket is invalid.") from error
+        if expires_at < int(datetime.now(UTC).timestamp()):
             raise ConsentError("Consent ticket expired.")
         return hashlib.sha256(ticket.encode()).hexdigest()

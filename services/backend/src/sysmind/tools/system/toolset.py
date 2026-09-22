@@ -16,7 +16,14 @@ SYSTEM_TOOL_SPECS = (
 
 
 class SystemTools:
-    """Versioned read-only system collectors; this is not the Phase 3 Agent registry."""
+    """Versioned read-only system collectors; this is not the Phase 3 Agent registry.
+
+    These callables bypass ``ToolRegistry``/``ToolExecutor`` (no policy authorization,
+    schema validation, timeout or cancellation handling) and are driven *serially* by the
+    first-party scan/analysis coordinators with fixed, non-user arguments. They must never
+    be invoked on behalf of model output: any model-originated tool call has to go through
+    the Tool Registry so the authorization and safety layers still apply.
+    """
 
     def __init__(self, probe: SystemProbe) -> None:
         self._probe = probe

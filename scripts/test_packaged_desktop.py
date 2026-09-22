@@ -4,16 +4,47 @@ import argparse
 import ctypes
 import json
 import os
+import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import closing
 from ctypes import wintypes
 from pathlib import Path
 
 import psutil
 
 WM_CLOSE = 0x0010
+
+_VERSIONS_DIR = (
+    Path(__file__).resolve().parents[1] / "services" / "backend" / "alembic" / "versions"
+)
+
+
+def expected_head_revision() -> str | None:
+    """Derive the migration head from the source scripts instead of hardcoding it.
+
+    A hardcoded revision has to be edited every time a migration is added, which makes the
+    packaged smoke test fail for reasons unrelated to packaging. Returns None when the head
+    cannot be determined (e.g. only packaged artifacts are available).
+    """
+    revisions: dict[str, str | None] = {}
+    for path in _VERSIONS_DIR.glob("*.py"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        revision = re.search(r'^revision: str = "([^"]+)"', text, re.MULTILINE)
+        if revision is None:
+            continue
+        down = re.search(r'^down_revision:[^=]*=\s*("[^"]+"|None)', text, re.MULTILINE)
+        down_value = None if down is None or down.group(1) == "None" else down.group(1).strip('"')
+        revisions[revision.group(1)] = down_value
+    referenced = {value for value in revisions.values() if value}
+    heads = [revision for revision in revisions if revision not in referenced]
+    return heads[0] if len(heads) == 1 else None
 
 
 def backend_children(desktop_pid: int) -> list[psutil.Process]:
@@ -52,6 +83,29 @@ def wait_for_backend_ready(process: psutil.Process, timeout: float = 20) -> None
             return
         time.sleep(0.1)
     raise RuntimeError("Packaged backend did not become ready on a loopback endpoint.")
+
+
+def wait_for_database_head(database_path: Path, timeout: float = 20) -> bool:
+    expected = expected_head_revision()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if database_path.is_file():
+            try:
+                with closing(sqlite3.connect(database_path)) as database:
+                    revision = database.execute(
+                        "SELECT version_num FROM alembic_version"
+                    ).fetchone()
+                if revision is None:
+                    pass
+                elif expected is not None and revision == (expected,):
+                    return True
+                elif expected is None and isinstance(revision[0], str) and revision[0]:
+                    # Head unknown (packaged-only run): accept any recorded revision.
+                    return True
+            except sqlite3.Error:
+                pass
+        time.sleep(0.1)
+    return False
 
 
 def close_visible_windows(process_id: int) -> None:
@@ -115,9 +169,19 @@ def main() -> None:
         backend = wait_for_backend(desktop.pid)
         wait_for_backend_ready(backend)
         try:
-            command_line = backend.cmdline()
+            database_path = data_directory / "sysmind.db"
+            results["data_directory_created"] = data_directory.is_dir()
+            results["database_migrated_to_head"] = wait_for_database_head(database_path)
+            results["database_created"] = database_path.is_file()
+            command_line = backend.cmdline() or []
+            session_token = (backend.environ() or {}).get("SYSMIND_SESSION_TOKEN", "")
             results["bundled_backend_started"] = True
-            results["session_token_not_in_arguments"] = "--session-token" not in command_line
+            # Scan every argv string: the token must not appear as its own value,
+            # nor via `--session-token` / `--session-token=...` prefix forms.
+            results["session_token_not_in_arguments"] = not any(
+                part.startswith("--session-token") or (session_token and session_token in part)
+                for part in command_line
+            )
 
             second = launch(executable, data_directory)
             try:

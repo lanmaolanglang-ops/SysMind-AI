@@ -3,14 +3,19 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-const EXPECTED_API_VERSION: &str = "1.0";
+const EXPECTED_API_VERSION: &str = crate::generated_version::EXPECTED_API_VERSION;
 const HANDSHAKE_PREFIX: &str = "SYSMIND_ENDPOINT ";
+/// The backend publishes its endpoint before the HTTP server starts serving. If it is
+/// alive but silent for longer than this, startup is treated as failed instead of
+/// blocking the reader thread forever.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BackendEndpoint {
@@ -27,9 +32,12 @@ pub struct BackendSnapshot {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EndpointHandshake {
+    event: String,
     host: String,
     port: u16,
+    backend_version: String,
     api_version: String,
 }
 
@@ -41,6 +49,7 @@ struct HealthProbe {
 }
 
 struct BackendRuntime {
+    generation: u64,
     snapshot: BackendSnapshot,
     child: Option<Child>,
     #[cfg(windows)]
@@ -55,6 +64,7 @@ impl BackendManager {
     pub fn new() -> Self {
         Self {
             runtime: Arc::new(Mutex::new(BackendRuntime {
+                generation: 0,
                 snapshot: BackendSnapshot {
                     state: "disconnected",
                     endpoint: None,
@@ -72,17 +82,19 @@ impl BackendManager {
     }
 
     pub fn start(&self, app: &AppHandle) {
-        {
+        let generation = {
             let mut runtime = lock_runtime(&self.runtime);
             if runtime.child.is_some() || runtime.snapshot.state == "starting" {
                 return;
             }
+            runtime.generation = runtime.generation.wrapping_add(1);
             runtime.snapshot = BackendSnapshot {
                 state: "starting",
                 endpoint: None,
                 error: None,
             };
-        }
+            runtime.generation
+        };
 
         let token = Uuid::new_v4().to_string() + &Uuid::new_v4().to_string();
         let data_dir = std::env::var_os("SYSMIND_DATA_DIR")
@@ -95,7 +107,7 @@ impl BackendManager {
         let launcher = match LauncherCommand::resolve(app) {
             Ok(launcher) => launcher,
             Err(error) => {
-                self.fail(error);
+                self.fail(generation, error);
                 return;
             }
         };
@@ -114,10 +126,13 @@ impl BackendManager {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => {
-                self.fail(format!(
-                    "Could not start the Python sidecar using '{}': {error}",
-                    launcher.program.display()
-                ));
+                self.fail(
+                    generation,
+                    format!(
+                        "Could not start the Python sidecar using '{}': {error}",
+                        launcher.program.display()
+                    ),
+                );
                 return;
             }
         };
@@ -127,9 +142,10 @@ impl BackendManager {
             Ok(job) => Some(job),
             Err(error) => {
                 let _ = child.kill();
-                self.fail(format!(
-                    "Could not secure the sidecar process in a Windows Job: {error}"
-                ));
+                self.fail(
+                    generation,
+                    format!("Could not secure the sidecar process in a Windows Job: {error}"),
+                );
                 return;
             }
         };
@@ -138,6 +154,23 @@ impl BackendManager {
         let stderr = child.stderr.take();
         {
             let mut runtime = lock_runtime(&self.runtime);
+            if runtime.generation != generation {
+                drop(runtime);
+                let _ = child.kill();
+                let _ = child.wait();
+                // A concurrent shutdown may have raced past an empty `child` slot and
+                // returned without resetting the snapshot. Clear a stuck "starting"
+                // state so the UI can start again without an app restart.
+                let mut runtime = lock_runtime(&self.runtime);
+                if runtime.child.is_none() && runtime.snapshot.state == "starting" {
+                    runtime.snapshot = BackendSnapshot {
+                        state: "disconnected",
+                        endpoint: None,
+                        error: Some("Startup was cancelled.".to_string()),
+                    };
+                }
+                return;
+            }
             runtime.child = Some(child);
             #[cfg(windows)]
             {
@@ -146,7 +179,7 @@ impl BackendManager {
         }
 
         let monitor_shared = Arc::clone(&self.runtime);
-        thread::spawn(move || monitor_child_process(monitor_shared));
+        thread::spawn(move || monitor_child_process(monitor_shared, generation));
 
         let shared = Arc::clone(&self.runtime);
         thread::spawn(move || {
@@ -161,39 +194,35 @@ impl BackendManager {
             }
 
             let Some(stdout) = stdout else {
-                set_failure(&shared, "Backend stdout was not available.".to_string());
+                set_failure(
+                    &shared,
+                    generation,
+                    "Backend stdout was not available.".to_string(),
+                );
                 return;
             };
-            let mut endpoint = None;
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(parsed) = parse_handshake(&line) {
-                    endpoint = Some(parsed);
-                    break;
+            // Read stdout on a worker thread and forward each line over a channel so the
+            // handshake wait can enforce a wall-clock timeout. Without this a backend that
+            // starts but never prints its endpoint (deadlock, dependency stall, unflushed
+            // stdout) would block this thread forever and leave the UI spinning.
+            let (line_tx, line_rx) = mpsc::channel::<String>();
+            thread::spawn(move || {
+                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    if line_tx.send(line).is_err() {
+                        return;
+                    }
                 }
-            }
+            });
 
-            let Some(handshake) = endpoint else {
-                set_failure(
-                    &shared,
-                    "Backend exited before publishing its local endpoint.".to_string(),
-                );
-                return;
+            let handshake = match await_handshake(&line_rx, HANDSHAKE_TIMEOUT) {
+                Ok(handshake) => handshake,
+                Err(message) => {
+                    set_failure(&shared, generation, message.to_string());
+                    return;
+                }
             };
-            if handshake.host != "127.0.0.1" {
-                set_failure(
-                    &shared,
-                    "Backend attempted to use a non-loopback host.".to_string(),
-                );
-                return;
-            }
-            if handshake.api_version != EXPECTED_API_VERSION {
-                set_failure(
-                    &shared,
-                    format!(
-                        "API protocol mismatch: desktop expects {EXPECTED_API_VERSION}, backend reported {}.",
-                        handshake.api_version
-                    ),
-                );
+            if let Some(error) = handshake_contract_error(&handshake) {
+                set_failure(&shared, generation, error);
                 return;
             }
 
@@ -205,13 +234,16 @@ impl BackendManager {
             match wait_until_ready(&backend_endpoint, Duration::from_secs(10)) {
                 Ok(()) => {
                     let mut runtime = lock_runtime(&shared);
+                    if runtime.generation != generation {
+                        return;
+                    }
                     runtime.snapshot = BackendSnapshot {
                         state: "connected",
                         endpoint: Some(backend_endpoint),
                         error: None,
                     };
                 }
-                Err(error) => set_failure(&shared, error),
+                Err(error) => set_failure(&shared, generation, error),
             }
         });
     }
@@ -219,10 +251,26 @@ impl BackendManager {
     pub fn shutdown(&self) {
         let (endpoint, mut child) = {
             let mut runtime = lock_runtime(&self.runtime);
+            runtime.generation = runtime.generation.wrapping_add(1);
             (runtime.snapshot.endpoint.clone(), runtime.child.take())
         };
 
         let Some(mut owned_child) = child.take() else {
+            // No child handle yet (start() lost the race before publishing it).
+            // Still reset the snapshot so the UI cannot stick on "starting".
+            let mut runtime = lock_runtime(&self.runtime);
+            if runtime.child.is_none() {
+                let previous_error = runtime.snapshot.error.take();
+                runtime.snapshot = BackendSnapshot {
+                    state: "disconnected",
+                    endpoint: None,
+                    error: previous_error.or_else(|| Some("Startup was cancelled.".to_string())),
+                };
+                #[cfg(windows)]
+                {
+                    runtime.job = None;
+                }
+            }
             return;
         };
         if let Some(endpoint) = endpoint {
@@ -243,10 +291,13 @@ impl BackendManager {
         }
 
         let mut runtime = lock_runtime(&self.runtime);
+        // Preserve any recorded error (e.g. an unexpected exit) instead of wiping the
+        // crash context; a clean shutdown simply keeps `None`.
+        let previous_error = runtime.snapshot.error.take();
         runtime.snapshot = BackendSnapshot {
             state: "disconnected",
             endpoint: None,
-            error: None,
+            error: previous_error,
         };
         #[cfg(windows)]
         {
@@ -254,8 +305,8 @@ impl BackendManager {
         }
     }
 
-    fn fail(&self, message: String) {
-        set_failure(&self.runtime, message);
+    fn fail(&self, generation: u64, message: String) {
+        set_failure(&self.runtime, generation, message);
     }
 }
 
@@ -265,9 +316,12 @@ fn lock_runtime(runtime: &Arc<Mutex<BackendRuntime>>) -> MutexGuard<'_, BackendR
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn set_failure(runtime: &Arc<Mutex<BackendRuntime>>, message: String) {
+fn set_failure(runtime: &Arc<Mutex<BackendRuntime>>, generation: u64, message: String) {
     eprintln!("SysMind backend lifecycle error: {message}");
     let mut managed = lock_runtime(runtime);
+    if managed.generation != generation {
+        return;
+    }
     if let Some(mut child) = managed.child.take() {
         let _ = child.kill();
         let _ = child.wait();
@@ -283,10 +337,13 @@ fn set_failure(runtime: &Arc<Mutex<BackendRuntime>>, message: String) {
     };
 }
 
-fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>) {
+fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>, generation: u64) {
     loop {
         thread::sleep(Duration::from_millis(250));
         let mut managed = lock_runtime(&runtime);
+        if managed.generation != generation {
+            return;
+        }
         let Some(child) = managed.child.as_mut() else {
             return;
         };
@@ -306,6 +363,12 @@ fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>) {
             }
             Ok(None) => {}
             Err(error) => {
+                // Drop the handle so a later start() is not blocked by `child.is_some()`.
+                managed.child = None;
+                #[cfg(windows)]
+                {
+                    managed.job = None;
+                }
                 managed.snapshot = BackendSnapshot {
                     state: "disconnected",
                     endpoint: None,
@@ -320,6 +383,62 @@ fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>) {
 fn parse_handshake(line: &str) -> Option<EndpointHandshake> {
     let payload = line.strip_prefix(HANDSHAKE_PREFIX)?;
     serde_json::from_str(payload).ok()
+}
+
+/// Wait for the first parseable handshake line, bounded by `timeout`.
+///
+/// Returns `Err` with an operator-facing message when the stream ends first (the
+/// process exited) or when the deadline passes while the process is still silent.
+fn await_handshake(
+    lines: &mpsc::Receiver<String>,
+    timeout: Duration,
+) -> Result<EndpointHandshake, &'static str> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Err("Backend did not publish its local endpoint in time.");
+        };
+        match lines.recv_timeout(remaining) {
+            Ok(line) => {
+                if let Some(parsed) = parse_handshake(&line) {
+                    return Ok(parsed);
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                return Err("Backend did not publish its local endpoint in time.");
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err("Backend exited before publishing its local endpoint.");
+            }
+        }
+    }
+}
+
+/// Enforces the published sidecar handshake contract
+/// (contracts/schemas/sidecar-handshake.schema.json) before any connection is trusted.
+fn handshake_contract_error(handshake: &EndpointHandshake) -> Option<String> {
+    if handshake.event != "sysmind_endpoint" {
+        return Some(format!(
+            "Backend handshake event mismatch: expected sysmind_endpoint, got {}.",
+            handshake.event
+        ));
+    }
+    if handshake.host != "127.0.0.1" {
+        return Some("Backend attempted to use a non-loopback host.".to_string());
+    }
+    if handshake.port == 0 {
+        return Some("Backend handshake published an invalid port.".to_string());
+    }
+    if handshake.backend_version.trim().is_empty() {
+        return Some("Backend handshake omitted its backend version.".to_string());
+    }
+    if handshake.api_version != EXPECTED_API_VERSION {
+        return Some(format!(
+            "API protocol mismatch: desktop expects {EXPECTED_API_VERSION}, backend reported {}.",
+            handshake.api_version
+        ));
+    }
+    None
 }
 
 fn wait_until_ready(endpoint: &BackendEndpoint, timeout: Duration) -> Result<(), String> {
@@ -384,7 +503,13 @@ fn send_http_request(
     let (headers, body) = response
         .split_once("\r\n\r\n")
         .ok_or_else(|| "Backend returned a malformed HTTP response.".to_string())?;
-    if !headers.starts_with("HTTP/1.1 200") {
+    // Parse the status line instead of prefix-matching it, so an unexpected status such
+    // as "HTTP/1.1 2000" or a different protocol version cannot be mistaken for success.
+    let status_line = headers.lines().next().unwrap_or_default();
+    let mut status_parts = status_line.split_whitespace();
+    let protocol_ok = matches!(status_parts.next(), Some("HTTP/1.1") | Some("HTTP/1.0"));
+    let code_ok = status_parts.next() == Some("200");
+    if !protocol_ok || !code_ok {
         return Err("Backend returned a non-success response.".to_string());
     }
     Ok(body.to_string())
@@ -397,6 +522,11 @@ struct LauncherCommand {
 
 impl LauncherCommand {
     fn resolve(app: &AppHandle) -> Result<Self, String> {
+        // Debug-only escape hatch for iterating on the backend: it lets a developer point
+        // the shell at an arbitrary interpreter. It must NOT be honoured in release builds,
+        // where a hostile process could preset the variable to launch an arbitrary binary
+        // and receive the session token.
+        #[cfg(debug_assertions)]
         if let Some(program) = std::env::var_os("SYSMIND_BACKEND_EXECUTABLE") {
             return Ok(Self {
                 program: PathBuf::from(program),
@@ -508,11 +638,14 @@ mod tests {
 
     #[test]
     fn parses_loopback_endpoint_handshake() {
-        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"api_version":"1.0"}"#;
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
         let handshake = parse_handshake(line).expect("valid handshake");
+        assert_eq!(handshake.event, "sysmind_endpoint");
         assert_eq!(handshake.host, "127.0.0.1");
         assert_eq!(handshake.port, 43123);
+        assert_eq!(handshake.backend_version, "0.1.0");
         assert_eq!(handshake.api_version, EXPECTED_API_VERSION);
+        assert!(handshake_contract_error(&handshake).is_none());
     }
 
     #[test]
@@ -521,10 +654,66 @@ mod tests {
     }
 
     #[test]
+    fn rejects_handshake_missing_event() {
+        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        assert!(parse_handshake(line).is_none());
+    }
+
+    #[test]
+    fn rejects_handshake_with_unknown_fields() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0","extra":1}"#;
+        assert!(parse_handshake(line).is_none());
+    }
+
+    #[test]
+    fn rejects_zero_port_handshake() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":0,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        let handshake = parse_handshake(line).expect("parseable handshake");
+        assert_eq!(
+            handshake_contract_error(&handshake).as_deref(),
+            Some("Backend handshake published an invalid port.")
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_event_name() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"other","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        let handshake = parse_handshake(line).expect("parseable handshake");
+        assert!(handshake_contract_error(&handshake)
+            .as_deref()
+            .unwrap_or_default()
+            .contains("event mismatch"));
+    }
+
+    #[test]
     fn detects_protocol_mismatch() {
-        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"api_version":"2.0"}"#;
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"2.0"}"#;
         let handshake = parse_handshake(line).expect("valid handshake");
         assert_ne!(handshake.api_version, EXPECTED_API_VERSION);
+        assert_eq!(
+            handshake_contract_error(&handshake).as_deref(),
+            Some("API protocol mismatch: desktop expects 1.0, backend reported 2.0.")
+        );
+    }
+
+    #[test]
+    fn handshake_without_backend_version_is_not_parseable() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"api_version":"1.0"}"#;
+        assert!(parse_handshake(line).is_none());
+
+        let blank = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"  ","api_version":"1.0"}"#;
+        let handshake = parse_handshake(blank).expect("parseable handshake");
+        assert!(handshake_contract_error(&handshake).is_some());
+    }
+
+    #[test]
+    fn non_loopback_handshake_fails_the_contract() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"0.0.0.0","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        let handshake = parse_handshake(line).expect("parseable handshake");
+        assert_eq!(
+            handshake_contract_error(&handshake).as_deref(),
+            Some("Backend attempted to use a non-loopback host.")
+        );
     }
 
     #[test]
@@ -532,5 +721,65 @@ mod tests {
         let path = bundled_backend_path(PathBuf::from("C:/Program Files/SysMind/resources"));
 
         assert!(path.ends_with(PathBuf::from("backend/sysmind-backend.exe")));
+    }
+
+    #[test]
+    fn stale_generation_cannot_publish_failure() {
+        let runtime = Arc::new(Mutex::new(BackendRuntime {
+            generation: 2,
+            snapshot: BackendSnapshot {
+                state: "starting",
+                endpoint: None,
+                error: None,
+            },
+            child: None,
+            #[cfg(windows)]
+            job: None,
+        }));
+
+        set_failure(&runtime, 1, "stale startup failed".to_string());
+
+        let snapshot = lock_runtime(&runtime).snapshot.clone();
+        assert_eq!(snapshot.state, "starting");
+        assert!(snapshot.error.is_none());
+    }
+
+    #[test]
+    fn await_handshake_returns_first_parseable_line() {
+        let (tx, rx) = mpsc::channel();
+        tx.send("backend ready on port 4000".to_string()).unwrap();
+        tx.send(
+            r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#
+                .to_string(),
+        )
+        .unwrap();
+
+        let handshake = await_handshake(&rx, Duration::from_secs(1)).expect("handshake");
+        assert_eq!(handshake.port, 43123);
+    }
+
+    #[test]
+    fn await_handshake_times_out_when_backend_is_silent() {
+        let (_tx, rx) = mpsc::channel::<String>();
+
+        let result = await_handshake(&rx, Duration::from_millis(50));
+
+        assert_eq!(
+            result.err(),
+            Some("Backend did not publish its local endpoint in time.")
+        );
+    }
+
+    #[test]
+    fn await_handshake_reports_early_exit_when_stream_closes() {
+        let (tx, rx) = mpsc::channel::<String>();
+        drop(tx);
+
+        let result = await_handshake(&rx, Duration::from_secs(1));
+
+        assert_eq!(
+            result.err(),
+            Some("Backend exited before publishing its local endpoint.")
+        );
     }
 }

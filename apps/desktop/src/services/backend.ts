@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { ApiClient, ApiClientError } from "./api-client";
+import { EXPECTED_API_VERSION } from "./generated-version";
 
-const EXPECTED_API_VERSION = "1.0";
+export type { components } from "./openapi-types";
+export { EXPECTED_API_VERSION, PRODUCT_VERSION } from "./generated-version";
 
 export interface BackendEndpoint {
   base_url: string;
@@ -45,6 +47,21 @@ export async function restartBackendLauncher(): Promise<void> {
   await invoke<BackendSnapshot>("restart_backend");
 }
 
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => resolve();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+  });
+}
+
 async function waitForEndpoint(signal?: AbortSignal): Promise<BackendEndpoint> {
   const deadline = Date.now() + 12_000;
 
@@ -53,10 +70,23 @@ async function waitForEndpoint(signal?: AbortSignal): Promise<BackendEndpoint> {
       throw new BackendConnectionError("connection_cancelled", "连接已取消。");
     }
 
-    let snapshot: BackendSnapshot;
-    try {
-      snapshot = await invoke<BackendSnapshot>("backend_status");
-    } catch {
+    let snapshot: BackendSnapshot | null = null;
+    // The Tauri launcher can briefly fail to answer while the backend process is
+    // still attaching; retry a few times before declaring the launcher unavailable.
+    for (let attempt = 0; attempt < 3 && snapshot === null; attempt += 1) {
+      try {
+        snapshot = await invoke<BackendSnapshot>("backend_status");
+      } catch {
+        if (attempt === 2) {
+          throw new BackendConnectionError(
+            "launcher_unavailable",
+            "无法读取本地后端启动状态。",
+          );
+        }
+        await delay(200, signal);
+      }
+    }
+    if (snapshot === null) {
       throw new BackendConnectionError(
         "launcher_unavailable",
         "无法读取本地后端启动状态。",
@@ -71,7 +101,8 @@ async function waitForEndpoint(signal?: AbortSignal): Promise<BackendEndpoint> {
       );
     }
 
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+    // Abort-aware wait so unmounting a component cancels the pending poll immediately.
+    await delay(150, signal);
   }
 
   throw new BackendConnectionError(

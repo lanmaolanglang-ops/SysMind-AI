@@ -1,7 +1,7 @@
 # SysMind AI 新对话完整交接文档（Phase 5 完成后）
 
 更新时间：2026-08-20
-工作区：`D:\SysMind AI`
+工作区：仓库根目录
 当前阶段：**Phase 5 实现完成；下一开发阶段为 Phase 6 打包发布**
 
 ## 1. 新对话必须先知道的事情
@@ -190,19 +190,19 @@ Windows 服务可以安全启停，因此没有创建 privileged helper、UAC、
 复验命令：
 
 ```powershell
-Set-Location 'D:\SysMind AI\services\backend'
+Set-Location '<repository-root>\services\backend'
 .\.venv\Scripts\python.exe -m ruff check .
 .\.venv\Scripts\python.exe -m mypy src
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m alembic heads
 
-Set-Location 'D:\SysMind AI'
+Set-Location '<repository-root>'
 pnpm lint
 pnpm typecheck
 pnpm test -- --run
 pnpm build
 
-Set-Location 'D:\SysMind AI\apps\desktop\src-tauri'
+Set-Location '<repository-root>\apps\desktop\src-tauri'
 cargo fmt --check
 cargo test
 ```
@@ -222,7 +222,7 @@ cargo test
 Windows Sandbox 或带快照的 VM 中运行并保存输出：
 
 ```powershell
-Set-Location 'D:\SysMind AI'
+Set-Location '<repository-root>'
 .\scripts\run-phase5a-isolated-tests.ps1 -ConfirmIsolatedEnvironment
 ```
 
@@ -255,7 +255,7 @@ Set-Location 'D:\SysMind AI'
 
 ```text
 请先阅读 AGENTS.md、docs/SysMind-AI-PRD-and-Architecture.md 和
-docs/progress/project-handoff-after-phase5.md。当前 D:\SysMind AI 工作区包含 Phase 2–5 的
+docs/progress/project-handoff-after-phase5.md。当前仓库工作区包含 Phase 2–5 的
 大量未提交成果，必须全部保留，禁止 reset/restore/clean。Phase 5 实现已经完成，默认质量门
 为后端 87 passed、前端 22 passed、Rust 3 passed；4 项真实状态变更测试只能在 Sandbox/VM
 运行，目前尚未完成外部隔离验收。请根据交接文档确认状态后，再继续 PRD 的 Phase 6，不要

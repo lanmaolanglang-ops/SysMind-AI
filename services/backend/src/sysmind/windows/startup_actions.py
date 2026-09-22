@@ -8,29 +8,44 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
+from sysmind.application.ports.actions import ActionVerificationError, TargetChangedError
 from sysmind.domain.actions import MutationResult, StartupActionCandidate
+from sysmind.security.redaction import redact_secrets
 from sysmind.tools.contracts import ToolPermissionError, ToolUnavailableError
+from sysmind.windows.identity import opaque_item_id, startup_item_id
+from sysmind.windows.platform_inspection import _basename
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _REPARSE_POINT = 0x400
 
 
-class TargetChangedError(RuntimeError):
-    pass
-
-
 def _digest(*parts: object) -> str:
-    return hashlib.sha256("\0".join(str(part) for part in parts).encode()).hexdigest()
+    return opaque_item_id(*parts)
 
 
-def _basename(command: str) -> str | None:
-    text = command.strip()
-    if not text:
-        return None
-    executable = (
-        text.split('"', 2)[1] if text.startswith('"') and '"' in text[1:] else text.split()[0]
-    )
-    return Path(executable).name or None
+# Recovery metadata is read back from disk and its `name` is reused as a Run key
+# value name and as a Startup folder file name. Anything that can write the
+# recovery directory would otherwise choose that name, so keep it to what a real
+# startup entry can be: bounded, printable, and free of path/wildcard characters.
+_MAX_ENTRY_NAME_LENGTH = 255
+_FORBIDDEN_ENTRY_NAME_CHARS = frozenset('\\/:*?"<>|')
+# Windows reserved device names, also reserved with an extension ("NUL.txt").
+_WINDOWS_RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{index}" for index in range(1, 10)}
+    | {f"LPT{index}" for index in range(1, 10)}
+)
+
+
+def _require_safe_entry_name(name: str) -> str:
+    if not 1 <= len(name) <= _MAX_ENTRY_NAME_LENGTH:
+        raise TargetChangedError("Recovery record is invalid.")
+    if any(char in _FORBIDDEN_ENTRY_NAME_CHARS or ord(char) < 32 for char in name):
+        raise TargetChangedError("Recovery record is invalid.")
+    stem = name.split(".", 1)[0].rstrip(" ").upper()
+    if stem in _WINDOWS_RESERVED_DEVICE_NAMES:
+        raise TargetChangedError("Recovery record is invalid.")
+    return name
 
 
 class WindowsStartupActionAdapter:
@@ -49,7 +64,7 @@ class WindowsStartupActionAdapter:
                     name, value, value_type = winreg.EnumValue(key, index)
                     found.append(
                         StartupActionCandidate(
-                            _digest("user_run", name),
+                            startup_item_id("user_run", name),
                             name,
                             "user_run",
                             _basename(str(value)),
@@ -65,7 +80,7 @@ class WindowsStartupActionAdapter:
                     stat = entry.stat()
                     found.append(
                         StartupActionCandidate(
-                            _digest("user_startup", entry.name),
+                            startup_item_id("user_startup", entry.name),
                             entry.stem,
                             "user_startup",
                             entry.name,
@@ -96,19 +111,39 @@ class WindowsStartupActionAdapter:
                     value, value_type = winreg.QueryValueEx(key, candidate.name)
                     if _digest("user_run", candidate.name, value_type, value) != observed_revision:
                         raise TargetChangedError("Startup target changed after confirmation.")
+                    # Recovery metadata lives on disk. The Run command line is required
+                    # to restore the registry value, so it cannot be dropped or hashed
+                    # away; encryption of recovery material is out of scope. At least
+                    # strip credential-looking substrings (password=/token=/Bearer/…)
+                    # so a recovery directory never holds plaintext secrets. Full
+                    # redact_text is deliberately NOT applied here: it would mangle
+                    # user-profile paths and break restore.
+                    if isinstance(value, str):
+                        safe_value: object = redact_secrets(value)
+                        value_digest = hashlib.sha256(
+                            cast(str, safe_value).encode("utf-8")
+                        ).hexdigest()
+                    else:
+                        safe_value = value
+                        value_digest = None
                     metadata = {
                         "kind": "user_run",
                         "name": candidate.name,
-                        "value": value,
+                        "value": safe_value,
                         "value_type": value_type,
+                        # Digest of the value as stored at disable time. Restore
+                        # refuses to write a payload that no longer matches.
+                        "value_digest": value_digest,
                     }
                     self._write_metadata(directory, metadata)
                     winreg.DeleteValue(key, candidate.name)
             except PermissionError as error:
+                shutil.rmtree(directory, ignore_errors=True)
                 raise ToolPermissionError(
                     "Current-user startup entry could not be changed."
                 ) from error
             except OSError as error:
+                shutil.rmtree(directory, ignore_errors=True)
                 raise TargetChangedError("Startup target is no longer available.") from error
         else:
             folder = self._startup_folder()
@@ -122,10 +157,16 @@ class WindowsStartupActionAdapter:
             ):
                 raise TargetChangedError("Startup file changed after confirmation.")
             metadata = {"kind": "user_startup", "name": source.name}
-            self._write_metadata(directory, metadata)
-            shutil.move(str(source), str(directory / "item"))
+            try:
+                self._write_metadata(directory, metadata)
+                shutil.move(str(source), str(directory / "item"))
+            except OSError:
+                shutil.rmtree(directory, ignore_errors=True)
+                raise
         if any(item.item_id == item_id for item in self.candidates()):
-            raise ToolUnavailableError("Startup action could not be verified.")
+            raise ActionVerificationError(
+                "Startup action could not be verified.", recovery_id=recovery_id
+            )
         return MutationResult(recovery_id, None)
 
     def restore(self, recovery_id: str) -> MutationResult:
@@ -134,12 +175,23 @@ class WindowsStartupActionAdapter:
         kind, name = metadata.get("kind"), metadata.get("name")
         if not isinstance(name, str) or kind not in {"user_run", "user_startup"}:
             raise TargetChangedError("Recovery record is invalid.")
-        item_id = _digest(kind, name)
+        _require_safe_entry_name(name)
+        item_id = startup_item_id(kind, name)
         if any(item.item_id == item_id for item in self.candidates()):
             raise TargetChangedError("Startup target slot is already occupied.")
         if kind == "user_run":
             import winreg
 
+            stored_value = cast(Any, metadata.get("value"))
+            stored_digest = metadata.get("value_digest")
+            # When the disable-time digest is present, require the restore payload to
+            # still match it (metadata.json integrity). Absent digest keeps older
+            # recovery records restorable.
+            if stored_digest is not None and (
+                not isinstance(stored_value, str)
+                or hashlib.sha256(stored_value.encode("utf-8")).hexdigest() != stored_digest
+            ):
+                raise TargetChangedError("Recovery record value was changed.")
             try:
                 with winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE
@@ -149,7 +201,7 @@ class WindowsStartupActionAdapter:
                         name,
                         0,
                         int(cast(Any, metadata["value_type"])),
-                        cast(Any, metadata["value"]),
+                        stored_value,
                     )
             except (OSError, KeyError, TypeError) as error:
                 raise ToolPermissionError(
@@ -163,7 +215,7 @@ class WindowsStartupActionAdapter:
             shutil.move(str(directory / "item"), str(destination))
         restored = next((item for item in self.candidates() if item.item_id == item_id), None)
         if restored is None:
-            raise ToolUnavailableError("Startup recovery could not be verified.")
+            raise ActionVerificationError("Startup recovery could not be verified.")
         shutil.rmtree(directory)
         return MutationResult(None, restored.observed_revision)
 

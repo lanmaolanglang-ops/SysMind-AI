@@ -1,28 +1,42 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
+from sysmind.application.ports.log_analyses import LogAnalysisRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.diagnostics import StepStatus
 from sysmind.domain.event_logs import AnalysisStatus, LogAnalysisRecord
+from sysmind.infrastructure.database.cas import allowed_source_statuses
 from sysmind.infrastructure.database.models import EventLogAnalysis, EventLogStepEvent
+
+_TERMINAL_STATUSES = frozenset({"completed", "partial", "cancelled", "failed"})
+_NON_TERMINAL_STATUSES = frozenset({"queued", "running"})
 
 
 def _parse_time(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+def _loads(raw: str | None, default: object) -> object:
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 def _to_record(model: EventLogAnalysis) -> LogAnalysisRecord:
-    query = cast(dict[str, object], json.loads(model.query_json))
-    summary = cast(
-        dict[str, object] | None,
-        json.loads(model.summary_json) if model.summary_json else None,
-    )
-    failures = cast(list[dict[str, str]], json.loads(model.failures_json))
+    query = cast(dict[str, object], _loads(model.query_json, {}))
+    summary = cast(dict[str, object] | None, _loads(model.summary_json, None))
+    failures = cast(list[dict[str, str]], _loads(model.failures_json, []))
     return LogAnalysisRecord(
         id=model.id,
         status=cast(AnalysisStatus, model.status),
@@ -32,12 +46,12 @@ def _to_record(model: EventLogAnalysis) -> LogAnalysisRecord:
         finished_at=model.finished_at.isoformat() if model.finished_at else None,
         query=query,
         summary=summary,
-        failures=failures,
+        failures=tuple(failures),
         schema_version=model.schema_version,
     )
 
 
-class SqlAlchemyLogAnalysisRepository:
+class SqlAlchemyLogAnalysisRepository(LogAnalysisRepository):
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
 
@@ -66,21 +80,48 @@ class SqlAlchemyLogAnalysisRepository:
         current_step: str | None,
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
-        failures: list[dict[str, str]] | None = None,
+        failures: Sequence[dict[str, str]] | None = None,
+        expected_statuses: Sequence[AnalysisStatus] | None = None,
     ) -> LogAnalysisRecord:
+        allowed = allowed_source_statuses(
+            target_status=status,
+            non_terminal=_NON_TERMINAL_STATUSES,
+            terminal=_TERMINAL_STATUSES,
+            expected=expected_statuses,
+        )
+        values: dict[str, object] = {
+            "status": status,
+            "progress": progress,
+            "current_step": current_step,
+            "finished_at": _parse_time(finished_at),
+        }
+        if summary is not None:
+            values["summary_json"] = json.dumps(summary, ensure_ascii=False)
+        if failures is not None:
+            values["failures_json"] = json.dumps(list(failures), ensure_ascii=False)
         with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(EventLogAnalysis)
+                    .where(EventLogAnalysis.id == analysis_id, EventLogAnalysis.status.in_(allowed))
+                    .values(**values)
+                ),
+            )
             model = session.get(EventLogAnalysis, analysis_id)
             if model is None:
                 raise KeyError(analysis_id)
-            model.status = status
-            model.progress = progress
-            model.current_step = current_step
-            model.finished_at = _parse_time(finished_at)
-            if summary is not None:
-                model.summary_json = json.dumps(summary, ensure_ascii=False)
-            if failures is not None:
-                model.failures_json = json.dumps(failures, ensure_ascii=False)
-        return _to_record(model)
+            if result.rowcount != 1 and (
+                expected_statuses is not None
+                or status in _TERMINAL_STATUSES
+                and model.status != status
+            ):
+                raise StateConflict(
+                    analysis_id,
+                    expected=allowed,
+                    actual=model.status,
+                )
+            return _to_record(model)
 
     def add_step_event(
         self,
@@ -137,7 +178,7 @@ class SqlAlchemyLogAnalysisRepository:
             )
             models = list(session.scalars(statement))
             for model in models:
-                failures = json.loads(model.failures_json)
+                failures = cast(list[dict[str, str]], _loads(model.failures_json, []))
                 failures.append(
                     {
                         "tool": model.current_step or "log_analysis",

@@ -6,10 +6,27 @@ from typing import Protocol
 from sysmind.domain.actions import (
     ActionCandidate,
     ActionRecord,
+    ActionStatus,
     MutationResult,
     ProcessActionCandidate,
     StartupActionCandidate,
 )
+
+
+class TargetChangedError(RuntimeError):
+    """The action target no longer matches the evidence-bound revision."""
+
+
+class ActionVerificationError(RuntimeError):
+    """A mutation completed but its post-state could not be verified."""
+
+    def __init__(self, message: str, *, recovery_id: str | None = None) -> None:
+        super().__init__(message)
+        self.recovery_id = recovery_id
+
+
+class ActionStateConflict(RuntimeError):
+    """The persisted action no longer has the expected source state."""
 
 
 class StartupActionAdapter(Protocol):
@@ -33,6 +50,7 @@ class ActionRepository(Protocol):
         action_id: str,
         diagnosis_id: str,
         tool_name: str,
+        tool_version: str,
         target: ActionCandidate,
         created_at: str,
     ) -> ActionRecord: ...
@@ -45,7 +63,8 @@ class ActionRepository(Protocol):
         self,
         action_id: str,
         *,
-        status: str,
+        expected_statuses: Sequence[ActionStatus],
+        status: ActionStatus,
         updated_at: str,
         recovery_id: str | None = None,
         error_code: str | None = None,

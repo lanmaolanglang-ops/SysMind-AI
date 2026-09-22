@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
-from typing import cast
+from collections.abc import Sequence
+from datetime import datetime
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
-from sysmind.application.ports.actions import ActionRepository
+from sysmind.application.ports.actions import ActionRepository, ActionStateConflict
 from sysmind.domain.actions import (
+    DISABLE_STARTUP_TOOL,
+    RESTORE_STARTUP_TOOL,
     ActionCandidate,
     ActionRecord,
     ActionStatus,
     StartupActionCandidate,
     StartupSourceKind,
+    action_tool_version,
 )
 from sysmind.infrastructure.database.models import (
     ActionEventModel,
@@ -55,23 +60,28 @@ class SqlAlchemyActionRepository(ActionRepository):
         action_id: str,
         diagnosis_id: str,
         tool_name: str,
+        tool_version: str,
         target: ActionCandidate,
         created_at: str,
     ) -> ActionRecord:
         now = datetime.fromisoformat(created_at)
         with self._sessions.begin() as session:
-            session.add(
-                ActionPlanModel(
-                    id=plan_id, diagnosis_id=diagnosis_id, status="proposed", created_at=now
+            # Get-or-create: a plan row may already exist when several actions share a
+            # plan_id; blindly inserting would raise an integrity error.
+            plan = session.get(ActionPlanModel, plan_id)
+            if plan is None:
+                session.add(
+                    ActionPlanModel(
+                        id=plan_id, diagnosis_id=diagnosis_id, status="proposed", created_at=now
+                    )
                 )
-            )
-            session.flush()
+                session.flush()
             model = ActionModel(
                 id=action_id,
                 plan_id=plan_id,
                 diagnosis_id=diagnosis_id,
                 tool_name=tool_name,
-                tool_version="1.0",
+                tool_version=tool_version,
                 target_id=target.item_id,
                 target_name=target.name,
                 source_kind=target.source_kind,
@@ -92,6 +102,8 @@ class SqlAlchemyActionRepository(ActionRepository):
     def create_restore(
         self, *, plan_id: str, action_id: str, original: ActionRecord, created_at: str
     ) -> ActionRecord:
+        if original.tool_name != DISABLE_STARTUP_TOOL:
+            raise ValueError("Only a startup disable action can be restored.")
         if not original.recovery_id:
             raise ValueError("Action has no recovery record.")
         target = StartupActionCandidate(
@@ -105,7 +117,8 @@ class SqlAlchemyActionRepository(ActionRepository):
             plan_id=plan_id,
             action_id=action_id,
             diagnosis_id=original.diagnosis_id,
-            tool_name="startup.restore_current_user",
+            tool_name=RESTORE_STARTUP_TOOL,
+            tool_version=action_tool_version(RESTORE_STARTUP_TOOL),
             target=target,
             created_at=created_at,
         )
@@ -128,7 +141,8 @@ class SqlAlchemyActionRepository(ActionRepository):
         self,
         action_id: str,
         *,
-        status: str,
+        expected_statuses: Sequence[ActionStatus],
+        status: ActionStatus,
         updated_at: str,
         recovery_id: str | None = None,
         error_code: str | None = None,
@@ -136,16 +150,36 @@ class SqlAlchemyActionRepository(ActionRepository):
     ) -> ActionRecord:
         now = datetime.fromisoformat(updated_at)
         with self._sessions.begin() as session:
+            values: dict[str, object] = {
+                "status": status,
+                "updated_at": now,
+                "error_code": error_code,
+                "error_message": error_message,
+            }
+            if recovery_id is not None:
+                values["recovery_id"] = recovery_id
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(ActionModel)
+                    .where(
+                        ActionModel.id == action_id,
+                        ActionModel.status.in_(tuple(expected_statuses)),
+                    )
+                    .values(**values)
+                ),
+            )
+            if result.rowcount != 1:
+                if session.get(ActionModel, action_id) is None:
+                    raise KeyError(action_id)
+                raise ActionStateConflict(action_id)
             model = session.get(ActionModel, action_id)
-            if model is None:
+            if model is None:  # pragma: no cover - protected by the successful update
                 raise KeyError(action_id)
-            model.status, model.updated_at = status, now
-            model.error_code, model.error_message = error_code, error_message
             plan = session.get(ActionPlanModel, model.plan_id)
             if plan is not None:
                 plan.status = status
             if recovery_id is not None:
-                model.recovery_id = recovery_id
                 session.add(
                     RecoveryRecordModel(
                         id=recovery_id, action_id=action_id, status="available", created_at=now
@@ -207,19 +241,22 @@ class SqlAlchemyActionRepository(ActionRepository):
     def consume_confirmation(self, action_id: str, *, ticket_digest: str, consumed_at: str) -> bool:
         now = datetime.fromisoformat(consumed_at)
         with self._sessions.begin() as session:
-            row = session.scalar(
-                select(UserConfirmationModel).where(
-                    UserConfirmationModel.action_id == action_id,
-                    UserConfirmationModel.ticket_digest == ticket_digest,
-                )
+            # Compare-and-set: a ticket is consumed by exactly one caller even if the
+            # in-process action lock is ever bypassed (second process, refactor, ...).
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(UserConfirmationModel)
+                    .where(
+                        UserConfirmationModel.action_id == action_id,
+                        UserConfirmationModel.ticket_digest == ticket_digest,
+                        UserConfirmationModel.consumed_at.is_(None),
+                        UserConfirmationModel.expires_at >= now,
+                    )
+                    .values(consumed_at=now)
+                ),
             )
-            expires_at = row.expires_at if row is not None else None
-            if expires_at is not None and expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=UTC)
-            if row is None or row.consumed_at is not None or expires_at is None or expires_at < now:
-                return False
-            row.consumed_at = now
-            return True
+            return result.rowcount == 1
 
     def consume_recovery(self, recovery_id: str, *, consumed_at: str) -> None:
         now = datetime.fromisoformat(consumed_at)
@@ -227,7 +264,21 @@ class SqlAlchemyActionRepository(ActionRepository):
             recovery = session.get(RecoveryRecordModel, recovery_id)
             if recovery is None:
                 raise KeyError(recovery_id)
-            recovery.status, recovery.consumed_at = "consumed", now
+            # Compare-and-set: a recovery record is consumed by exactly one caller.
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(RecoveryRecordModel)
+                    .where(
+                        RecoveryRecordModel.id == recovery_id,
+                        RecoveryRecordModel.status == "available",
+                        RecoveryRecordModel.consumed_at.is_(None),
+                    )
+                    .values(status="consumed", consumed_at=now)
+                ),
+            )
+            if result.rowcount != 1:
+                raise KeyError(recovery_id)
             original = session.get(ActionModel, recovery.action_id)
             if original is not None:
                 original.recovery_id = None
@@ -259,6 +310,6 @@ class SqlAlchemyActionRepository(ActionRepository):
             return len(rows)
 
     def close(self) -> None:
-        bind = self._sessions.kw.get("bind")
-        if bind is not None:
-            bind.dispose()
+        # The session factory (and its engine) is owned by the composition root and may
+        # be shared with other repositories, so it must not be disposed from here.
+        return None

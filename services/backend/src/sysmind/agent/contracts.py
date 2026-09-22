@@ -1,25 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, TypeAlias
+from typing import Literal, Protocol, TypeAlias, get_args
+
+from sysmind.tools.contracts import ToolDescriptor as ToolDescriptor
 
 ProviderActionType: TypeAlias = Literal[
     "request_tool_calls", "ask_user", "propose_action", "finalize", "abort"
 ]
 
-
-@dataclass(frozen=True, slots=True)
-class ToolDescriptor:
-    name: str
-    version: str
-    description: str
-    input_schema: dict[str, object]
-    risk_level: str
-    sensitivity: tuple[str, ...]
-
-    @property
-    def qualified_name(self) -> str:
-        return f"{self.name}@{self.version}"
+# Single source of truth for provider identity. A new provider must be added here
+# first, otherwise it cannot satisfy the AgentProvider protocol and mypy rejects it.
+ProviderName: TypeAlias = Literal["fake", "openai_compatible"]
+KNOWN_PROVIDER_NAMES: frozenset[str] = frozenset(get_args(ProviderName))
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +37,7 @@ class ProviderRequest:
     tools: tuple[ToolDescriptor, ...]
     messages: tuple[dict[str, object], ...] = ()
     max_output_tokens: int = 800
+    response_format: Literal["agent_action", "structured_plan"] = "agent_action"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +51,7 @@ class ProviderResponse:
 
 class AgentProvider(Protocol):
     @property
-    def name(self) -> str: ...
+    def name(self) -> ProviderName: ...
 
     async def complete(self, request: ProviderRequest) -> ProviderResponse: ...
 

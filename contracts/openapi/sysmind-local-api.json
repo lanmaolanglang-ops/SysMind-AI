@@ -652,6 +652,58 @@
         }
       }
     },
+    "/api/v1/diagnoses/{diagnosis_id}/inputs": {
+      "post": {
+        "tags": [
+          "diagnoses"
+        ],
+        "summary": "Continue Diagnosis",
+        "operationId": "continue_diagnosis_api_v1_diagnoses__diagnosis_id__inputs_post",
+        "parameters": [
+          {
+            "name": "diagnosis_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Diagnosis Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContinueDiagnosisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/diagnoses/{diagnosis_id}": {
       "get": {
         "tags": [
@@ -1288,6 +1340,332 @@
           }
         }
       }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get Settings",
+        "operationId": "get_settings_api_v1_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Update Settings",
+        "operationId": "update_settings_api_v1_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSettingsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/credential": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Clear Credential",
+        "operationId": "clear_credential_api_v1_settings_credential_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Test Provider",
+        "operationId": "test_provider_api_v1_providers_test_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderTestResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/baseline": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Baseline",
+        "operationId": "baseline_api_v1_history_baseline_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaselineResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/retention": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Retention",
+        "operationId": "retention_api_v1_history_retention_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionPolicyResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Update Retention",
+        "operationId": "update_retention_api_v1_history_retention_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRetentionPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetentionPolicyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/cleanup": {
+      "post": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Cleanup",
+        "operationId": "cleanup_api_v1_history_cleanup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/{kind}/{record_id}/deletion-impact": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Deletion Impact",
+        "operationId": "deletion_impact_api_v1_history__kind___record_id__deletion_impact_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "scan",
+                "diagnosis",
+                "log"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionImpactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/history/{kind}/{record_id}/delete": {
+      "post": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Delete History",
+        "operationId": "delete_history_api_v1_history__kind___record_id__delete_post",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "scan",
+                "diagnosis",
+                "log"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmDeletionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1745,6 +2123,55 @@
         ],
         "title": "AgentToolCallDto"
       },
+      "BaselineMetricResponse": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          },
+          "median": {
+            "type": "number",
+            "title": "Median"
+          },
+          "latest": {
+            "type": "number",
+            "title": "Latest"
+          },
+          "delta": {
+            "type": "number",
+            "title": "Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "samples",
+          "median",
+          "latest",
+          "delta"
+        ],
+        "title": "BaselineMetricResponse"
+      },
+      "BaselineResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BaselineMetricResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "BaselineResponse"
+      },
       "CandidateListResponse": {
         "properties": {
           "items": {
@@ -1830,6 +2257,56 @@
         ],
         "title": "CapabilityDto"
       },
+      "CleanupResponse": {
+        "properties": {
+          "deleted_scans": {
+            "type": "integer",
+            "title": "Deleted Scans"
+          },
+          "deleted_diagnoses": {
+            "type": "integer",
+            "title": "Deleted Diagnoses"
+          },
+          "deleted_log_analyses": {
+            "type": "integer",
+            "title": "Deleted Log Analyses"
+          },
+          "protected_records": {
+            "type": "integer",
+            "title": "Protected Records"
+          },
+          "completed_at": {
+            "type": "string",
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted_scans",
+          "deleted_diagnoses",
+          "deleted_log_analyses",
+          "protected_records",
+          "completed_at"
+        ],
+        "title": "CleanupResponse"
+      },
+      "ConfirmDeletionRequest": {
+        "properties": {
+          "revision": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[a-f0-9]+$",
+            "title": "Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "title": "ConfirmDeletionRequest"
+      },
       "ConsentResponse": {
         "properties": {
           "action": {
@@ -1865,6 +2342,21 @@
           "expires_at"
         ],
         "title": "ConsentResponse"
+      },
+      "ContinueDiagnosisRequest": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Answer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer"
+        ],
+        "title": "ContinueDiagnosisRequest"
       },
       "CpuDto": {
         "properties": {
@@ -2028,6 +2520,62 @@
         ],
         "title": "CreateProcessActionRequest"
       },
+      "DeletionImpactResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "deletable": {
+            "type": "boolean",
+            "title": "Deletable"
+          },
+          "dependent_records": {
+            "type": "integer",
+            "title": "Dependent Records"
+          },
+          "protected_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protected Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "record_id",
+          "revision",
+          "deletable",
+          "dependent_records",
+          "protected_reason"
+        ],
+        "title": "DeletionImpactResponse"
+      },
+      "DeletionResponse": {
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "DeletionResponse"
+      },
       "DiagnosisFeedbackRequest": {
         "properties": {
           "helpful": {
@@ -2098,6 +2646,49 @@
             },
             "type": "array",
             "title": "Plan"
+          },
+          "diagnosis_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StructuredDiagnosisPlanDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agent_round_count": {
+            "type": "integer",
+            "title": "Agent Round Count",
+            "default": 0
+          },
+          "max_agent_rounds": {
+            "type": "integer",
+            "title": "Max Agent Rounds",
+            "default": 4
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "title": "Max Tool Calls",
+            "default": 8
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Reason"
+          },
+          "user_inputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "User Inputs"
           },
           "progress": {
             "type": "integer",
@@ -2373,6 +2964,53 @@
         ],
         "title": "EventGroupDto"
       },
+      "EvidenceDetailDto": {
+        "properties": {
+          "tool_call_id": {
+            "type": "string",
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "tool_version": {
+            "type": "string",
+            "title": "Tool Version"
+          },
+          "key_fields": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Key Fields"
+          },
+          "raw_result_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw Result Summary"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_call_id",
+          "tool_name",
+          "tool_version",
+          "key_fields",
+          "raw_result_summary"
+        ],
+        "title": "EvidenceDetailDto"
+      },
       "EvidenceDto": {
         "properties": {
           "tool_call_id": {
@@ -2453,6 +3091,13 @@
             },
             "type": "array",
             "title": "Evidence"
+          },
+          "evidence_details": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDetailDto"
+            },
+            "type": "array",
+            "title": "Evidence Details"
           }
         },
         "type": "object",
@@ -2547,6 +3192,74 @@
           "ready"
         ],
         "title": "HealthResponse"
+      },
+      "HypothesisDto": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "hypothesis": {
+            "type": "string",
+            "title": "Hypothesis"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "supporting_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDto"
+            },
+            "type": "array",
+            "title": "Supporting Evidence"
+          },
+          "contradicting_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDto"
+            },
+            "type": "array",
+            "title": "Contradicting Evidence"
+          },
+          "supporting_evidence_details": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDetailDto"
+            },
+            "type": "array",
+            "title": "Supporting Evidence Details"
+          },
+          "contradicting_evidence_details": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceDetailDto"
+            },
+            "type": "array",
+            "title": "Contradicting Evidence Details"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "key",
+          "hypothesis",
+          "rationale",
+          "supporting_evidence",
+          "contradicting_evidence",
+          "confidence",
+          "status"
+        ],
+        "title": "HypothesisDto"
       },
       "LogAnalysisFailureDto": {
         "properties": {
@@ -2934,6 +3647,81 @@
         ],
         "title": "ProcessDto"
       },
+      "ProviderSettingsResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "restart_required": {
+            "type": "boolean",
+            "title": "Restart Required",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "endpoint",
+          "configured",
+          "updated_at"
+        ],
+        "title": "ProviderSettingsResponse"
+      },
+      "ProviderTestResponse": {
+        "properties": {
+          "succeeded": {
+            "type": "boolean",
+            "title": "Succeeded"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "succeeded",
+          "error_code",
+          "duration_ms"
+        ],
+        "title": "ProviderTestResponse"
+      },
       "ReportDto": {
         "properties": {
           "schema_version": {
@@ -2969,6 +3757,13 @@
           "model_explanation": {
             "type": "string",
             "title": "Model Explanation"
+          },
+          "hypotheses": {
+            "items": {
+              "$ref": "#/components/schemas/HypothesisDto"
+            },
+            "type": "array",
+            "title": "Hypotheses"
           }
         },
         "type": "object",
@@ -2982,6 +3777,19 @@
           "model_explanation"
         ],
         "title": "ReportDto"
+      },
+      "RetentionPolicyResponse": {
+        "properties": {
+          "retention_days": {
+            "type": "integer",
+            "title": "Retention Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "retention_days"
+        ],
+        "title": "RetentionPolicyResponse"
       },
       "ScanFailureDto": {
         "properties": {
@@ -3287,6 +4095,50 @@
         "type": "object",
         "title": "StartLogAnalysisRequest"
       },
+      "StructuredDiagnosisPlanDto": {
+        "properties": {
+          "problem_category": {
+            "type": "string",
+            "title": "Problem Category"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "clarification_question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clarification Question"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problem_category",
+          "confidence",
+          "status",
+          "clarification_question",
+          "steps"
+        ],
+        "title": "StructuredDiagnosisPlanDto"
+      },
       "ToolCallDto": {
         "properties": {
           "id": {
@@ -3327,6 +4179,30 @@
               }
             ],
             "title": "Error Code"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
           }
         },
         "type": "object",
@@ -3402,6 +4278,65 @@
           "sensitivity"
         ],
         "title": "ToolDescriptorDto"
+      },
+      "UpdateProviderSettingsRequest": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "pattern": "^openai_compatible$",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model"
+          },
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Endpoint"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "endpoint"
+        ],
+        "title": "UpdateProviderSettingsRequest"
+      },
+      "UpdateRetentionPolicyRequest": {
+        "properties": {
+          "retention_days": {
+            "type": "integer",
+            "maximum": 3650.0,
+            "minimum": 7.0,
+            "title": "Retention Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "retention_days"
+        ],
+        "title": "UpdateRetentionPolicyRequest"
       },
       "ValidationError": {
         "properties": {

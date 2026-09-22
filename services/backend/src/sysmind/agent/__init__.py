@@ -8,6 +8,14 @@ from sysmind.agent.contracts import (
     ToolDescriptor,
 )
 from sysmind.agent.memory import WorkingMemory
+from sysmind.agent.planning import (
+    DiagnosisPlan,
+    DiagnosisPlanner,
+    DiagnosisPlannerError,
+    DiagnosisPlanStep,
+    FakeDiagnosisPlanner,
+    ProviderDiagnosisPlanner,
+)
 
 __all__ = [
     "AgentBrain",
@@ -18,4 +26,10 @@ __all__ = [
     "ProviderToolCall",
     "ToolDescriptor",
     "WorkingMemory",
+    "DiagnosisPlan",
+    "DiagnosisPlanStep",
+    "DiagnosisPlanner",
+    "DiagnosisPlannerError",
+    "FakeDiagnosisPlanner",
+    "ProviderDiagnosisPlanner",
 ]

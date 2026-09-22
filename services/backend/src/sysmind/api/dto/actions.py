@@ -4,7 +4,12 @@ from dataclasses import asdict
 
 from pydantic import BaseModel, Field
 
-from sysmind.domain.actions import ActionRecord, ProcessActionCandidate, StartupActionCandidate
+from sysmind.domain.actions import (
+    ActionRecord,
+    ActionStatus,
+    ProcessActionCandidate,
+    StartupActionCandidate,
+)
 
 
 class CandidateResponse(BaseModel):
@@ -55,7 +60,7 @@ class ActionResponse(BaseModel):
     tool_version: str
     target_name: str
     source_kind: str
-    status: str
+    status: ActionStatus
     recovery_available: bool
     error_code: str | None
     error_message: str | None
@@ -67,7 +72,10 @@ class ActionResponse(BaseModel):
         data = asdict(record)
         for key in ("target_id", "observed_revision", "recovery_id"):
             data.pop(key)
-        data["recovery_available"] = record.recovery_id is not None and record.status == "succeeded"
+        data["recovery_available"] = record.recovery_id is not None and record.status in {
+            "succeeded",
+            "verification_failed",
+        }
         return cls.model_validate(data)
 
 

@@ -3,6 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+def _require_count_matches(field_name: str, declared: int, derived: int) -> None:
+    if declared != derived:
+        raise ValueError(f"{field_name} ({declared}) disagrees with the collection ({derived}).")
+
+
+def _require_subset(field_name: str, declared: int, total: int) -> None:
+    if not 0 <= declared <= total:
+        raise ValueError(f"{field_name} ({declared}) must be between 0 and {total}.")
+
+
 @dataclass(frozen=True, slots=True)
 class ProxyConfiguration:
     enabled: bool
@@ -32,11 +42,20 @@ class PingResult:
 @dataclass(frozen=True, slots=True)
 class NetworkDiagnosis:
     adapter_count: int
-    has_default_route: bool
+    has_default_route: bool | None
     dns: DnsCheckResult | None
     ping: PingResult | None
     proxy: ProxyConfiguration
     failures: tuple[str, ...]
+    active_adapter_count: int = 0
+    default_gateway: str | None = None
+    gateway_reachable: bool | None = None
+    public_reachable: bool | None = None
+    # IPv6 default route is tracked separately so "no IPv4 gateway" cannot be
+    # misread as "no network path" on an IPv6-only host.
+    default_gateway_ipv6: str | None = None
+    has_default_route_ipv4: bool | None = None
+    has_default_route_ipv6: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +66,7 @@ class StartupItem:
     command_name: str | None
     publisher: str | None = None
     signature_status: str = "unavailable"
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +76,13 @@ class StartupAssessment:
     high_impact_count: int
     observations: tuple[str, ...]
     unknown_signature_count: int
+
+    def __post_init__(self) -> None:
+        # The counts are duplicates of what `items` already says. Left unchecked
+        # they drift silently, and every consumer trusts whichever field it reads.
+        _require_count_matches("item_count", self.item_count, len(self.items))
+        _require_subset("high_impact_count", self.high_impact_count, self.item_count)
+        _require_subset("unknown_signature_count", self.unknown_signature_count, self.item_count)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,3 +101,7 @@ class ServiceAssessment:
     service_count: int
     stopped_automatic_count: int
     observations: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _require_count_matches("service_count", self.service_count, len(self.services))
+        _require_subset("stopped_automatic_count", self.stopped_automatic_count, self.service_count)

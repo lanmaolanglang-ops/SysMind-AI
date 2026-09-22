@@ -28,5 +28,5 @@ Before publishing a release:
 3. Add verbatim notices or source offers where a dependency requires them.
 4. Record the reviewed dependency inventory with the release artifacts.
 
-This file documents third-party terms only. It does not assign a license to the SysMind AI project
-itself; that decision must be made by the project owner before public source or binary distribution.
+The SysMind AI project itself is distributed under the MIT License; see [`LICENSE`](../LICENSE).
+Third-party components remain subject to their own licenses and notices.

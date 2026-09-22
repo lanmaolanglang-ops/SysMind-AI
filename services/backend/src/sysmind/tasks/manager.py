@@ -11,6 +11,7 @@ from typing import cast
 from sysmind.agent.brain import AgentBrain, AgentRunError
 from sysmind.agent.contracts import AgentProvider, ToolDescriptor
 from sysmind.application.ports.agent_tasks import AgentTaskRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.agent_tasks import (
     AgentBudget,
     AgentTaskEvent,
@@ -19,6 +20,7 @@ from sysmind.domain.agent_tasks import (
     AgentToolCallRecord,
 )
 from sysmind.observability.logging import log_event
+from sysmind.security.redaction import redact_text
 from sysmind.tools.executor import ToolExecutor
 from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolRegistry, ToolRegistryError
@@ -26,9 +28,25 @@ from sysmind.tools.registry import ToolRegistry, ToolRegistryError
 AGENT_TASK_SCHEMA_VERSION = "1.0"
 _LOGGER = logging.getLogger(__name__)
 
+# Failure text is persisted and surfaced over SSE, so it is bounded and redacted.
+_MAX_FAILURE_MESSAGE = 280
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _safe_failure_message(error: AgentRunError) -> str:
+    """Redact provider/adapter text before it is stored and shown to the UI.
+
+    ``AgentRunError`` can wrap transport errors (URLs, response fragments) or adapter
+    error strings. The adjacent generic handler deliberately uses fixed copy; this
+    path keeps diagnostics but runs the shared redactor and clamps the length.
+    """
+    message = redact_text(str(error)).strip()
+    if not message:
+        return "Agent task failed without exposing sensitive details."
+    return message[:_MAX_FAILURE_MESSAGE]
 
 
 class AgentTaskManager:
@@ -61,6 +79,12 @@ class AgentTaskManager:
             definition = self._registry.require(qualified_name)
             if definition.risk_level != "read_only":
                 raise ToolRegistryError("Only read-only tools may enter a Phase 3 task.")
+        if budget.max_rounds < 1 or budget.max_tool_calls < 1:
+            raise ValueError("Agent budget must allow at least one round and one tool call.")
+        if budget.timeout_seconds <= 0:
+            raise ValueError("Agent budget timeout must be positive.")
+        if budget.max_parallel_tools < 1:
+            raise ValueError("Agent budget max_parallel_tools must be at least 1.")
         provider = self._provider_factory()
         task_id = str(uuid.uuid4())
         record = self._repository.create(
@@ -161,7 +185,7 @@ class AgentTaskManager:
             )
         except AgentRunError as error:
             status = "cancelled" if error.code == "cancelled" else "failed"
-            self._finish_failure(record, status, error.code, str(error))
+            self._finish_failure(record, status, error.code, _safe_failure_message(error))
         except asyncio.CancelledError:
             self._finish_failure(record, "cancelled", "cancelled", "Agent task was cancelled.")
         except Exception as error:
@@ -204,18 +228,29 @@ class AgentTaskManager:
         if status not in {"cancelled", "failed", "timed_out"}:
             raise ValueError("Invalid terminal task status.")
         typed_status = cast(AgentTaskStatus, status)
-        self._repository.update(
-            current.id,
-            status=typed_status,
-            current_round=current.current_round,
-            tool_call_count=current.tool_call_count,
-            progress=current.progress,
-            working_summary=current.working_summary,
-            finished_at=_now(),
-            failure_code=code,
-            failure_message=message,
-            cancel_requested=current.cancel_requested,
-        )
+        try:
+            self._repository.update(
+                current.id,
+                status=typed_status,
+                current_round=current.current_round,
+                tool_call_count=current.tool_call_count,
+                progress=current.progress,
+                working_summary=current.working_summary,
+                finished_at=_now(),
+                failure_code=code,
+                failure_message=message,
+                cancel_requested=current.cancel_requested,
+                expected_statuses=(
+                    "created",
+                    "planning",
+                    "running_tools",
+                    "analyzing",
+                    "cancelling",
+                ),
+            )
+        except StateConflict:
+            # A concurrent terminalizer already won; keep its result.
+            return
         self._repository.append_event(
             current.id,
             "task.failed",

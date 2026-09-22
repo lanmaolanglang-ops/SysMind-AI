@@ -4,7 +4,11 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from sysmind.domain.diagnostics import ScanRecord, ScanStatus
+from sysmind.domain.diagnostics import (
+    GPU_TELEMETRY_ADAPTER_SCOPE,
+    ScanRecord,
+    ScanStatus,
+)
 
 
 class CapabilityDto(BaseModel):
@@ -32,6 +36,11 @@ class GpuDto(BaseModel):
     name: str
     memory_bytes: int | None
     driver_version: str | None
+    telemetry_available: bool = False
+    utilization_percent: float | None = None
+    memory_used_bytes: int | None = None
+    telemetry_limitation: str | None = None
+    telemetry_scope: str = GPU_TELEMETRY_ADAPTER_SCOPE
 
 
 class MemoryDto(BaseModel):

@@ -19,6 +19,14 @@ describe("UpdatePanel", () => {
     mockedVersion.mockResolvedValue("0.1.0");
   });
 
+  it("disables update checks when the build has no configured updater", async () => {
+    render(<UpdatePanel updaterAvailable={false} />);
+
+    expect(await screen.findByText(/当前版本 0.1.0/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开发构建不提供更新" })).toBeDisabled();
+    expect(mockedCheck).not.toHaveBeenCalled();
+  });
+
   it("reports when the installed version is current", async () => {
     mockedCheck.mockResolvedValue(null);
     render(<UpdatePanel />);

@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import ctypes
-import hashlib
 import os
 import time
 from ctypes import wintypes
 from pathlib import Path
+from typing import Any, cast
 
 import psutil
 
+from sysmind.application.ports.actions import ActionVerificationError, TargetChangedError
 from sysmind.domain.actions import MutationResult, ProcessActionCandidate
 from sysmind.tools.contracts import ToolUnavailableError
-from sysmind.windows.startup_actions import TargetChangedError
+from sysmind.windows.diagnostics import normalized_cpu_percent
+from sysmind.windows.identity import opaque_item_id, process_item_id
 
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _PROCESS_TERMINATE = 0x0001
@@ -44,8 +46,12 @@ _PROTECTED_NAMES = {
     "searchhost.exe",
     "securityhealthsystray.exe",
     "securityhealthservice.exe",
+    "msmpeng.exe",
+    "svchost.exe",
 }
 _PROTECTED_NAME_FRAGMENTS = ("antivirus", "defender", "endpoint", "security", "edr")
+_MAX_VISIBLE_PROCESS_CANDIDATES = 200
+_CANDIDATE_ENUMERATION_BUDGET_SECONDS = 2.0
 
 
 class _SidAndAttributes(ctypes.Structure):
@@ -57,7 +63,12 @@ class _TokenUser(ctypes.Structure):
 
 
 def _digest(*parts: object) -> str:
-    return hashlib.sha256("\0".join(str(part) for part in parts).encode()).hexdigest()
+    return opaque_item_id(*parts)
+
+
+def _filetime_to_unix(filetime: wintypes.FILETIME) -> float:
+    raw = (filetime.dwHighDateTime << 32) | filetime.dwLowDateTime
+    return (raw - 116444736000000000) / 10_000_000.0
 
 
 class WindowsProcessActionAdapter:
@@ -75,10 +86,26 @@ class WindowsProcessActionAdapter:
         protected_pids = self._sysmind_process_tree()
         windows = self._visible_windows()
         candidates: list[ProcessActionCandidate] = []
-        for process in psutil.process_iter(("pid", "name", "create_time", "exe")):
+        deadline = time.monotonic() + _CANDIDATE_ENUMERATION_BUDGET_SECONDS
+        primed: list[tuple[psutil.Process, dict[str, object]]] = []
+        for pid in sorted(windows)[:_MAX_VISIBLE_PROCESS_CANDIDATES]:
+            if time.monotonic() >= deadline:
+                break
+            try:
+                process = psutil.Process(pid)
+                info = process.as_dict(attrs=("pid", "name", "create_time", "exe"))
+                process.cpu_percent(interval=None)
+                primed.append((process, info))
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+                continue
+        # One shared window keeps candidate discovery bounded instead of blocking per process.
+        time.sleep(0.1)
+        for process, info in primed:
+            if time.monotonic() >= deadline:
+                break
             pid = process.pid
             try:
-                name = str(process.info.get("name") or "")
+                name = str(info.get("name") or "")
                 handles = windows.get(pid, ())
                 if (
                     not handles
@@ -95,12 +122,15 @@ class WindowsProcessActionAdapter:
                     )
                 ):
                     continue
-                created = float(process.info["create_time"])
-                image = str(process.info.get("exe") or "").casefold()
+                created = float(cast(float, info["create_time"]))
+                image = str(info.get("exe") or "").casefold()
                 memory = round(process.memory_percent(), 2)
-                cpu = round(process.cpu_percent(interval=None), 1)
-                item_id = _digest("current_user_process", pid, created)
-                revision = _digest(pid, created, current_sid, current_session, image, *handles)
+                cpu = normalized_cpu_percent(process.cpu_percent(interval=None))
+                item_id = process_item_id(pid, created)
+                # HWND lists churn whenever a window is opened or recreated and are
+                # not process identity. Folding them into the revision raised false
+                # TargetChanged errors on the same live process.
+                revision = _digest(pid, round(float(created), 2), current_sid)
                 candidates.append(
                     ProcessActionCandidate(
                         item_id,
@@ -137,13 +167,19 @@ class WindowsProcessActionAdapter:
             wintypes.LPARAM,
         )
         user32.PostMessageW.restype = wintypes.BOOL
+        delivered = 0
         for handle in handles:
             owner = wintypes.DWORD()
             user32.GetWindowThreadProcessId(wintypes.HWND(handle), ctypes.byref(owner))
             if owner.value != candidate.pid:
                 raise TargetChangedError("Window ownership changed after confirmation.")
-            if not user32.PostMessageW(wintypes.HWND(handle), _WM_CLOSE, 0, 0):
-                raise ToolUnavailableError("Windows rejected the bounded close request.")
+            if user32.PostMessageW(wintypes.HWND(handle), _WM_CLOSE, 0, 0):
+                delivered += 1
+        if not delivered:
+            # Only fail when nothing was delivered. Aborting on the first failure
+            # used to report "nothing happened" after earlier windows had already
+            # been asked to close, which the caller cannot undo.
+            raise ToolUnavailableError("Windows rejected every bounded close request.")
         deadline = time.monotonic() + self._wait
         while time.monotonic() < deadline:
             if not self._same_process(candidate):
@@ -162,6 +198,14 @@ class WindowsProcessActionAdapter:
         kernel32.TerminateProcess.restype = wintypes.BOOL
         kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.GetProcessTimes.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        )
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
         handle = kernel32.OpenProcess(
             _PROCESS_TERMINATE | _PROCESS_QUERY_LIMITED_INFORMATION,
             False,
@@ -170,6 +214,11 @@ class WindowsProcessActionAdapter:
         if not handle:
             raise TargetChangedError("Process is no longer an eligible termination target.")
         try:
+            # Re-check identity on the opened handle: between candidate enumeration and
+            # OpenProcess the PID can be reused by a different process. A create-time
+            # mismatch means we must not terminate.
+            if not self._handle_matches_candidate(kernel32, handle, candidate):
+                raise TargetChangedError("Process identity changed after confirmation.")
             if not kernel32.TerminateProcess(handle, 0x53594D):
                 raise ToolUnavailableError("Windows rejected the bounded termination request.")
         finally:
@@ -179,15 +228,38 @@ class WindowsProcessActionAdapter:
             if not self._same_process(candidate):
                 return MutationResult(None, None, "terminated")
             time.sleep(0.05)
-        raise ToolUnavailableError("Process termination could not be verified.")
+        # TerminateProcess is asynchronous and was already accepted above, so a
+        # process that is still present means "not verified yet", not "Windows
+        # refused". ToolUnavailableError claimed the latter.
+        raise ActionVerificationError(
+            "Process termination was accepted but the process is still exiting."
+        )
+
+    @staticmethod
+    def _handle_matches_candidate(
+        kernel32: Any,
+        handle: int,
+        candidate: ProcessActionCandidate,
+    ) -> bool:
+        creation = wintypes.FILETIME()
+        exit_time = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            return False
+        created = _filetime_to_unix(creation)
+        return process_item_id(candidate.pid, created) == candidate.item_id
 
     def _same_process(self, candidate: ProcessActionCandidate) -> bool:
         try:
             process = psutil.Process(candidate.pid)
-            return (
-                _digest("current_user_process", candidate.pid, process.create_time())
-                == candidate.item_id
-            )
+            return process_item_id(candidate.pid, process.create_time()) == candidate.item_id
         except psutil.AccessDenied as error:
             raise ToolUnavailableError(
                 "Process identity could not be verified after execution."

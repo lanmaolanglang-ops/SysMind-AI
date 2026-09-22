@@ -7,16 +7,36 @@ import sys
 import time
 from collections.abc import Sequence
 from ctypes import wintypes
+from datetime import UTC, datetime
 from threading import Event
 from typing import Any, cast
 from xml.etree import ElementTree
 
+from defusedxml.common import DefusedXmlException  # type: ignore[import-untyped]
+from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignore[import-untyped]
+
 from sysmind.domain.event_logs import EventLevel, EventLogQuery, LogChannel, WindowsEvent
+from sysmind.security.redaction import redact_text
 from sysmind.tools.contracts import (
     ToolCancelledError,
     ToolPermissionError,
     ToolUnavailableError,
 )
+
+
+def _event_time(value: str) -> datetime:
+    """Parse an event timestamp for ordering, tolerating unusual producer formats.
+
+    Lexicographic ordering of ISO-8601 strings is wrong when offsets or fractional-second
+    precision differ, so events are ordered by the parsed instant instead. Unparseable
+    values sort to the beginning rather than raising.
+    """
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
 
 _LEVELS: dict[int, EventLevel] = {
     1: "critical",
@@ -33,19 +53,31 @@ _ERROR_TIMEOUT = 1460
 _EVT_QUERY_CHANNEL_PATH = 0x1
 _EVT_QUERY_REVERSE_DIRECTION = 0x200
 _EVT_RENDER_EVENT_XML = 1
-_USER_PATH = re.compile(r"(?i)([a-z]:\\users\\)[^\\\s]+")
-_IPV4 = re.compile(
-    r"(?<![\d.])(?:25[0-5]|2[0-4]\d|1?\d?\d)"
-    r"(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?![\d.])"
+# DOMAIN\user only. Filesystem path segments such as "Files\App" inside
+# "C:\Program Files\App\app.exe" must not be treated as accounts, so a match
+# cannot sit on either side of a path separator. The trailing lookahead also
+# blocks a backtracked partial match ("Files\A" out of "Files\App\...").
+_ACCOUNT = re.compile(
+    r"(?<![\\/:])(?<![\w.-])(?:[A-Za-z0-9_.-]{1,64})\\([A-Za-z0-9_.@$-]{1,64})(?![\\/:.\w])"
 )
-_ACCOUNT = re.compile(r"(?<![\w.-])(?:[A-Za-z0-9_.-]+)\\[A-Za-z0-9_.@$-]+")
+_ACCOUNT_FILE_SUFFIX = re.compile(
+    r"(?i)\.(exe|dll|sys|com|bat|cmd|ps1|vbs|js|wsf|msi|txt|log|xml|json|ini|dat|bin|drv)$"
+)
+# Event records are local XML; a hostile or corrupt payload must not be allowed
+# to exhaust memory before the parser rejects it.
+_MAX_EVENT_XML_CHARS = 256 * 1024
+
+
+def _redact_account(match: re.Match[str]) -> str:
+    if _ACCOUNT_FILE_SUFFIX.search(match.group(1)):
+        return match.group(0)
+    return "[ACCOUNT_REDACTED]"
 
 
 def redact_event_text(value: str, *, limit: int = 1000) -> str:
     normalized = " ".join(value.replace("\x00", " ").split())
-    normalized = _USER_PATH.sub(r"\1[REDACTED]", normalized)
-    normalized = _IPV4.sub("[IP_REDACTED]", normalized)
-    normalized = _ACCOUNT.sub("[ACCOUNT_REDACTED]", normalized)
+    normalized = redact_text(normalized)
+    normalized = _ACCOUNT.sub(_redact_account, normalized)
     if len(normalized) > limit:
         return f"{normalized[: limit - 1]}…"
     return normalized
@@ -69,8 +101,12 @@ def _safe_filename(value: str | None) -> str | None:
 def parse_event_xml(xml: str, channel: str) -> WindowsEvent | None:
     if channel not in _ALLOWED_CHANNELS:
         return None
+    if not isinstance(xml, str) or not xml or len(xml) > _MAX_EVENT_XML_CHARS:
+        return None
     try:
-        root = ElementTree.fromstring(xml)
+        # defusedxml rejects DTD/entity expansion; the catch below also covers
+        # deep nesting that blows the interpreter stack while walking nodes.
+        root = _safe_fromstring(xml)
         namespace = {"e": "http://schemas.microsoft.com/win/2004/08/events/event"}
         system = root.find("e:System", namespace)
         if system is None:
@@ -143,7 +179,14 @@ def parse_event_xml(xml: str, channel: str) -> WindowsEvent | None:
                 redact_event_text(exception_code, limit=80) if exception_code else None
             ),
         )
-    except (ElementTree.ParseError, TypeError, ValueError):
+    except (
+        ElementTree.ParseError,
+        DefusedXmlException,
+        TypeError,
+        ValueError,
+        RecursionError,
+        MemoryError,
+    ):
         return None
 
 
@@ -223,7 +266,7 @@ class WindowsEventLogProbe:
                         self._api.EvtClose(event_handle)
         finally:
             self._api.EvtClose(result_handle)
-        events.sort(key=lambda item: item.timestamp, reverse=True)
+        events.sort(key=lambda item: _event_time(item.timestamp), reverse=True)
         return tuple(events)
 
     def _render_xml(self, event_handle: wintypes.HANDLE) -> str:

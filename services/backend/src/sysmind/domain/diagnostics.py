@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal, TypeAlias
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,11 +28,38 @@ class CpuInfo:
     frequency_mhz: float | None
 
 
+# Neutral, adapter-agnostic copy shown whenever real-time GPU telemetry is unavailable.
+GPU_TELEMETRY_UNAVAILABLE = "Real-time GPU utilization is unavailable."
+# WDDM counters expose a per-adapter LUID, and Win32_VideoController does not, so the
+# readings cannot be attributed to a named adapter on multi-GPU systems.
+GpuTelemetryScope: TypeAlias = Literal["system", "adapter"]
+GPU_TELEMETRY_SYSTEM_SCOPE: Final[GpuTelemetryScope] = "system"
+GPU_TELEMETRY_ADAPTER_SCOPE: Final[GpuTelemetryScope] = "adapter"
+GPU_TELEMETRY_UNAVAILABLE_OTHERS = (
+    "GPU telemetry is reported at system level and attached to the first adapter."
+)
+
+
 @dataclass(frozen=True, slots=True)
 class GpuInfo:
     name: str
     memory_bytes: int | None
     driver_version: str | None
+    telemetry_available: bool = False
+    utilization_percent: float | None = None
+    memory_used_bytes: int | None = None
+    telemetry_limitation: str | None = None
+    telemetry_scope: GpuTelemetryScope = GPU_TELEMETRY_ADAPTER_SCOPE
+
+    def __post_init__(self) -> None:
+        if self.telemetry_available:
+            if self.telemetry_limitation is not None:
+                raise ValueError("Available GPU telemetry cannot also declare a limitation.")
+            return
+        # Unavailable telemetry always carries an explanation, so consumers never have to
+        # guess why utilization is missing.
+        if self.telemetry_limitation is None:
+            object.__setattr__(self, "telemetry_limitation", GPU_TELEMETRY_UNAVAILABLE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +88,7 @@ class ProcessInfo:
     cpu_percent: float
     memory_bytes: int
     memory_percent: float
+    item_id: str | None = None
 
 
 ScanStatus = Literal["queued", "running", "completed", "partial", "cancelled", "failed"]
@@ -76,5 +104,13 @@ class ScanRecord:
     started_at: str
     finished_at: str | None
     summary: dict[str, object] | None
-    failures: list[dict[str, str]]
+    failures: tuple[dict[str, str], ...]
     schema_version: str
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.progress <= 100:
+            raise ValueError(f"progress must be between 0 and 100, got {self.progress}.")
+        # `frozen=True` blocks attribute rebinding but not mutation of the containers, so
+        # the mapping is copied to stop an external reference from mutating the record.
+        if self.summary is not None:
+            object.__setattr__(self, "summary", dict(self.summary))

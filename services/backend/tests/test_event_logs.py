@@ -76,6 +76,20 @@ class TimeoutEventLogProbe(FixtureEventLogProbe):
         return ()
 
 
+class PartiallySlowEventLogProbe(FixtureEventLogProbe):
+    def __init__(self) -> None:
+        super().__init__()
+        self.system_started = Event()
+
+    def query(self, query: EventLogQuery, cancel_event: Event) -> Sequence[WindowsEvent]:
+        if query.channel == "Application":
+            return super().query(query, cancel_event)
+        self.system_started.set()
+        if cancel_event.wait(2):
+            raise ToolCancelledError("cancelled")
+        return ()
+
+
 def _client(settings: Settings, probe: FixtureEventLogProbe) -> TestClient:
     repository = SqlAlchemyLogAnalysisRepository(create_session_factory(settings.database_url))
     coordinator = LogAnalysisCoordinator(repository, LogTools(probe))
@@ -177,13 +191,18 @@ def test_analysis_preserves_results_when_one_channel_is_denied(
     with engine.connect() as connection:
         rows = connection.execute(
             text(
-                "SELECT arguments_hash, result_summary_json "
+                "SELECT tool_name, arguments_hash, result_summary_json "
                 "FROM event_log_step_events WHERE analysis_id = :analysis_id"
             ),
             {"analysis_id": payload["id"]},
         ).all()
     engine.dispose()
-    assert len(rows) == 3
+    # Assert the shape of the audit trail, not a brittle literal count.
+    assert {row.tool_name for row in rows} == {
+        "log.windows_event.query",
+        "log.crash.analyze",
+    }
+    assert sum(1 for row in rows if row.tool_name == "log.crash.analyze") == 1
     assert all(len(row.arguments_hash) == 64 for row in rows)
 
 
@@ -240,6 +259,26 @@ def test_running_analysis_can_be_cancelled(
     assert payload["status"] == "cancelled"
 
 
+def test_cancelled_analysis_keeps_consistent_partial_event_summary(
+    settings: Settings, auth_headers: dict[str, str]
+) -> None:
+    probe = PartiallySlowEventLogProbe()
+    with _client(settings, probe) as client:
+        response = client.post(
+            "/api/v1/log-analyses",
+            headers=auth_headers,
+            json={"channels": ["Application", "System"], "max_events": 1},
+        )
+        analysis_id = response.json()["id"]
+        assert probe.system_started.wait(1)
+        client.post(f"/api/v1/log-analyses/{analysis_id}/cancel", headers=auth_headers)
+        payload = _wait_for_terminal(client, analysis_id, auth_headers)
+
+    assert payload["status"] == "cancelled"
+    assert payload["summary"]["event_count"] == 1
+    assert len(payload["summary"]["events"]) == 1
+
+
 def test_query_timeout_is_safe_and_audited(
     settings: Settings,
     auth_headers: dict[str, str],
@@ -249,8 +288,8 @@ def test_query_timeout_is_safe_and_audited(
         log_analysis_module,
         "LOG_TOOL_SPECS",
         (
-            ToolSpec("log.windows_event.query", "1.0", 0.01),
             ToolSpec("log.crash.analyze", "1.0", 1.0),
+            ToolSpec("log.windows_event.query", "1.0", 0.01),
         ),
     )
     with _client(settings, TimeoutEventLogProbe()) as client:
@@ -278,3 +317,24 @@ def test_windows_event_log_adapter_smoke() -> None:
 
     assert len(events) <= 5
     assert all(event.channel == "Application" for event in events)
+
+
+def test_replay_parameters_are_revalidated_against_the_allowlists() -> None:
+    """Allowlist revalidation helpers remain for any future opt-in resume path."""
+    from sysmind.application.services.log_analysis import _replay_parameters
+
+    valid = {
+        "channels": ["Application"],
+        "lookback_hours": 24,
+        "levels": ["error"],
+        "event_ids": [1000],
+        "max_events": 50,
+    }
+    assert _replay_parameters(valid) == (("Application",), 24, ("error",), (1000,), 50)
+
+    assert _replay_parameters({**valid, "channels": ["Security"]}) is None
+    assert _replay_parameters({**valid, "levels": ["verbose"]}) is None
+    assert _replay_parameters({**valid, "lookback_hours": 500}) is None
+    assert _replay_parameters({**valid, "max_events": 0}) is None
+    assert _replay_parameters({**valid, "channels": []}) is None
+    assert _replay_parameters({}) is None

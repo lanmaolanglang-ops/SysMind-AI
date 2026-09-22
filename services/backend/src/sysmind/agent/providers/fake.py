@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from sysmind.agent.contracts import (
     AgentProvider,
     ProviderAction,
+    ProviderName,
     ProviderRequest,
     ProviderResponse,
 )
@@ -26,13 +27,16 @@ class FakeProvider(AgentProvider):
             metadata={"mode": "deterministic_fake"},
         )
         self.requests: list[ProviderRequest] = []
+        self._max_requests = 64
 
     @property
-    def name(self) -> str:
+    def name(self) -> ProviderName:
         return "fake"
 
     async def complete(self, request: ProviderRequest) -> ProviderResponse:
         self.requests.append(request)
+        if len(self.requests) > self._max_requests:
+            del self.requests[: len(self.requests) - self._max_requests]
         if self._delay_seconds:
             await asyncio.sleep(self._delay_seconds)
         outcome = self._outcomes.pop(0) if self._outcomes else self._default

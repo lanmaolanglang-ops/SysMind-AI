@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 from threading import Event
+from typing import cast, get_args
 
 from sysmind.application.ports.log_analyses import LogAnalysisRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.diagnostics import StepStatus
 from sysmind.domain.event_logs import (
+    MAX_EVENTS,
+    MAX_LOOKBACK_HOURS,
     AnalysisStatus,
     EventLevel,
     EventLogQuery,
@@ -27,6 +33,7 @@ from sysmind.tools.contracts import (
     ToolSpec,
     ToolUnavailableError,
 )
+from sysmind.tools.executor import AnyCancelEvent
 from sysmind.tools.log import LOG_TOOL_SPECS, LogTools
 
 LOG_ANALYSIS_SCHEMA_VERSION = "1.0"
@@ -35,6 +42,49 @@ _LOGGER = logging.getLogger(__name__)
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# Kept in step with QuickScanCoordinator: a crash used to strand a running
+# analysis until the user started a new one. Only recently started work is
+# replayed, and only a little of it, so a backlog cannot flood the machine.
+# Allowlist constants used when validating a stored query (kept for any future
+# opt-in resume path and for defense-in-depth tests).
+_ALLOWED_CHANNEL_NAMES = frozenset(get_args(LogChannel))
+_ALLOWED_LEVEL_NAMES = frozenset(get_args(EventLevel))
+
+
+def _replay_parameters(
+    query: dict[str, object],
+) -> tuple[tuple[LogChannel, ...], int, tuple[EventLevel, ...], tuple[int, ...], int] | None:
+    """Rebuild the original request from the stored query, or refuse to guess."""
+    channels = query.get("channels")
+    lookback_hours = query.get("lookback_hours")
+    levels = query.get("levels")
+    event_ids = query.get("event_ids")
+    max_events = query.get("max_events")
+    if not isinstance(channels, list) or not channels:
+        return None
+    if not isinstance(levels, list) or not levels:
+        return None
+    if not isinstance(event_ids, list):
+        return None
+    if not isinstance(lookback_hours, int) or not 1 <= lookback_hours <= MAX_LOOKBACK_HOURS:
+        return None
+    if not isinstance(max_events, int) or not 1 <= max_events <= MAX_EVENTS:
+        return None
+    if not all(item in _ALLOWED_CHANNEL_NAMES for item in channels):
+        return None
+    if not all(item in _ALLOWED_LEVEL_NAMES for item in levels):
+        return None
+    if not all(isinstance(item, int) and not isinstance(item, bool) for item in event_ids):
+        return None
+    return (
+        cast("tuple[LogChannel, ...]", tuple(str(item) for item in channels)),
+        lookback_hours,
+        cast("tuple[EventLevel, ...]", tuple(str(item) for item in levels)),
+        tuple(int(item) for item in event_ids),
+        max_events,
+    )
 
 
 def _arguments_hash(arguments: dict[str, object]) -> str:
@@ -73,6 +123,10 @@ class LogAnalysisCoordinator:
         max_events: int,
         correlation_id: str | None = None,
     ) -> LogAnalysisRecord:
+        if not channels:
+            # Fail before persisting anything: an empty channel list would otherwise blow up
+            # inside the background task as an opaque IndexError.
+            raise ValueError("At least one event-log channel must be requested.")
         query: dict[str, object] = {
             "channels": list(channels),
             "lookback_hours": lookback_hours,
@@ -108,6 +162,11 @@ class LogAnalysisCoordinator:
         return self._repository.recent(limit)
 
     def recover_interrupted(self) -> int:
+        """Mark orphaned analyses as failed; do not auto-replay.
+
+        PRD/ADR require that an interrupted run terminates rather than silently
+        restarting collection. Users can start a new analysis from the UI.
+        """
         return self._repository.mark_interrupted(_now())
 
     def cancel(self, analysis_id: str) -> LogAnalysisRecord | None:
@@ -137,11 +196,13 @@ class LogAnalysisCoordinator:
         max_events: int,
         cancellation: Event,
         correlation_id: str | None,
+        collected_events: list[WindowsEvent],
     ) -> None:
         failures: list[dict[str, str]] = []
-        events: list[WindowsEvent] = []
-        query_spec = LOG_TOOL_SPECS[0]
-        analyze_spec = LOG_TOOL_SPECS[1]
+        events = collected_events
+        specs_by_name = {spec.name: spec for spec in LOG_TOOL_SPECS}
+        query_spec = specs_by_name["log.windows_event.query"]
+        analyze_spec = specs_by_name["log.crash.analyze"]
         steps = len(channels) + 1
         self._repository.update(
             analysis_id,
@@ -161,7 +222,7 @@ class LogAnalysisCoordinator:
 
         for index, channel_value in enumerate(channels):
             if cancellation.is_set():
-                self._finish_cancelled(analysis_id, events, failures)
+                self._finish_cancelled(analysis_id, events, failures, max_events=max_events)
                 return
             channel = channel_value
             event_query = EventLogQuery(
@@ -187,11 +248,13 @@ class LogAnalysisCoordinator:
                 code, message, failure_status = _failure(error)
                 failures.append({"tool": current_step, "code": code, "message": message})
                 if failure_status == "cancelled":
-                    self._finish_cancelled(analysis_id, events, failures)
+                    self._finish_cancelled(
+                        analysis_id, events, failures, max_events=max_events
+                    )
                     return
 
         if cancellation.is_set():
-            self._finish_cancelled(analysis_id, events, failures)
+            self._finish_cancelled(analysis_id, events, failures, max_events=max_events)
             return
         typed_events = sorted(events, key=lambda item: item.timestamp, reverse=True)[:max_events]
         self._repository.update(
@@ -229,15 +292,29 @@ class LogAnalysisCoordinator:
         final_status: AnalysisStatus = "partial" if failures else "completed"
         if failures and not typed_events:
             final_status = "failed"
-        self._repository.update(
-            analysis_id,
-            status=final_status,
-            progress=100,
-            current_step=None,
-            finished_at=_now(),
-            summary=summary,
-            failures=failures,
-        )
+        try:
+            self._repository.update(
+                analysis_id,
+                status=final_status,
+                progress=100,
+                current_step=None,
+                finished_at=_now(),
+                summary=summary,
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )
+        except StateConflict:
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Log analysis finalize lost the terminal-state race.",
+                component="log_analysis",
+                event_type="analysis_state_conflict",
+                correlation_id=correlation_id,
+                analysis_id=analysis_id,
+                requested_status=final_status,
+            )
+            return
         log_event(
             _LOGGER,
             logging.INFO,
@@ -265,14 +342,21 @@ class LogAnalysisCoordinator:
         error_message: str | None = None
         result: tuple[WindowsEvent, ...] = ()
         arguments = asdict(query)
+        timed_out = Event()
         try:
             value = await asyncio.wait_for(
-                asyncio.to_thread(self._tools.query, query, cancellation),
+                asyncio.to_thread(
+                    self._tools.query, query, AnyCancelEvent(cancellation, timed_out)
+                ),
                 timeout=spec.timeout_seconds,
             )
             result = tuple(value)
             return result
         except Exception as error:
+            if isinstance(error, TimeoutError):
+                # wait_for abandons the awaitable but the worker thread keeps running;
+                # signal just this query so it can stop without cancelling siblings.
+                timed_out.set()
             error_code, error_message, status = _failure(error)
             raise
         finally:
@@ -301,40 +385,70 @@ class LogAnalysisCoordinator:
         cancellation: Event,
         correlation_id: str | None,
     ) -> None:
+        # Shared with _run so a CancelledError can still persist what was collected.
+        collected_events: list[WindowsEvent] = []
         try:
-            await self._run(
-                analysis_id,
-                channels,
-                lookback_hours,
-                levels,
-                event_ids,
-                max_events,
-                cancellation,
-                correlation_id,
-            )
+            async with asyncio.timeout(30):
+                await self._run(
+                    analysis_id,
+                    channels,
+                    lookback_hours,
+                    levels,
+                    event_ids,
+                    max_events,
+                    cancellation,
+                    correlation_id,
+                    collected_events,
+                )
         except asyncio.CancelledError:
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:
-                self._finish_cancelled(analysis_id, [], record.failures)
+                self._finish_cancelled(
+                    analysis_id, collected_events, record.failures, max_events=max_events
+                )
+        except TimeoutError:
+            cancellation.set()
+            record = self._repository.get(analysis_id)
+            if record and record.status in {"queued", "running"}:
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        analysis_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=[
+                            *record.failures,
+                            {
+                                "tool": "log_analysis",
+                                "code": "global_timeout",
+                                "message": "日志分析达到 30 秒总预算，底层操作正在有界收尾。",
+                            },
+                        ],
+                        expected_statuses=("queued", "running"),
+                    )
         except Exception as error:
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:
-                self._repository.update(
-                    analysis_id,
-                    status="failed",
-                    progress=record.progress,
-                    current_step=None,
-                    finished_at=_now(),
-                    summary=record.summary or {},
-                    failures=[
-                        *record.failures,
-                        {
-                            "tool": record.current_step or "log_analysis",
-                            "code": "analysis_failed",
-                            "message": "日志分析任务意外中断。",
-                        },
-                    ],
-                )
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        analysis_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=[
+                            *record.failures,
+                            {
+                                "tool": record.current_step or "log_analysis",
+                                "code": "analysis_failed",
+                                "message": "日志分析任务意外中断。",
+                            },
+                        ],
+                        expected_statuses=("queued", "running"),
+                    )
             log_event(
                 _LOGGER,
                 logging.ERROR,
@@ -352,20 +466,28 @@ class LogAnalysisCoordinator:
         self,
         analysis_id: str,
         events: list[WindowsEvent],
-        failures: list[dict[str, str]],
+        failures: Sequence[dict[str, str]],
+        *,
+        max_events: int,
     ) -> None:
         current = self._repository.get(analysis_id)
-        self._repository.update(
-            analysis_id,
-            status="cancelled",
-            progress=current.progress if current else 0,
-            current_step=None,
-            finished_at=_now(),
-            summary={
-                "event_count": len(events),
-                "events": [],
-                "event_groups": [],
-                "crash_groups": [],
-            },
-            failures=failures,
-        )
+        retained_events = sorted(events, key=lambda item: item.timestamp, reverse=True)[
+            :max_events
+        ]
+        with contextlib.suppress(StateConflict):
+            self._repository.update(
+                analysis_id,
+                status="cancelled",
+                progress=current.progress if current else 0,
+                current_step=None,
+                finished_at=_now(),
+                summary={
+                    "event_count": len(retained_events),
+                    "events": [asdict(item) for item in retained_events],
+                    "event_groups": [],
+                    "crash_groups": [],
+                    "notice": "分析已取消；仅保留取消前在本地归一化并脱敏的事件。",
+                },
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )

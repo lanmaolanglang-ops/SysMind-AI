@@ -1,6 +1,16 @@
 # SysMind AI security model
 
-Last updated: 2026-08-20
+Last updated: 2026-08-22
+
+## Provider credentials
+
+- Production Windows builds store the OpenAI-compatible API key as a current-user Generic
+  Credential under the fixed `SysMindAI/provider.api_key` target.
+- SQLite stores only the provider, model, HTTPS-or-loopback endpoint, and opaque secret reference.
+- Settings reads never return credential material. Connection-test audit rows contain only provider,
+  outcome, stable error code, duration, and timestamp.
+- Provider requests are created only in backend memory. Authorization headers and full response
+  bodies are excluded from application logs and audit rows.
 
 ## Trust boundaries
 
@@ -33,10 +43,20 @@ Last updated: 2026-08-20
 
 Phase 6 targets Windows 10/11 x64 and per-user installation. It adds no administrator helper, service
 control, arbitrary file deletion, generic registry writes, network changes, or command execution.
-Downgrades are unsupported because database migrations are forward-only.
+Migration scripts implement both upgrade and downgrade, and the round trip is covered by tests; product recovery policy is still forward-only (roll-forward fixes, not database downgrades).
+
+## History deletion and retention
+
+- Only terminal read-only scans, diagnoses, and log analyses are deletion candidates.
+- Deletion requires the exact SHA-256 revision returned by the impact preview; stale requests fail.
+- Diagnoses referenced by an action plan are protected from manual and retention deletion.
+- Cleanup runs append count-only audit summaries and never include report bodies.
+- Baselines use at most ten completed local scan summaries and do not infer missing telemetry.
 
 ## Vulnerability handling
 
 Do not include API keys, session tokens, unredacted logs, or personal diagnostic exports in a report.
-Until a public security contact is established, use the repository host's private security-advisory
-channel. Public release is blocked if no private reporting channel is configured.
+Use the repository's enabled
+[GitHub private vulnerability-reporting channel](https://github.com/lanmaolanglang-ops/SysMind-AI/security/advisories/new).
+Do not open a public issue for a suspected vulnerability. The contributor-facing reporting policy is
+published in [`.github/SECURITY.md`](../.github/SECURITY.md).

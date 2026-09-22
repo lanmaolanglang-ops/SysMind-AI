@@ -5,9 +5,31 @@ from typing import Literal, TypeAlias
 
 DiagnosisCategory: TypeAlias = Literal["performance", "network", "crash"]
 DiagnosisStatus: TypeAlias = Literal[
-    "queued", "running", "completed", "partial", "cancelled", "failed", "interrupted"
+    "queued",
+    "running",
+    "waiting_user_input",
+    "completed",
+    "partial",
+    "cancelled",
+    "failed",
+    "interrupted",
 ]
 Severity: TypeAlias = Literal["info", "low", "medium", "high"]
+HypothesisStatus: TypeAlias = Literal["active", "confirmed", "rejected", "insufficient"]
+StopReason: TypeAlias = Literal[
+    "evidence_sufficient",
+    "user_cancelled",
+    "insufficient_information",
+    "budget_exceeded",
+    "risk_limit_reached",
+    "backend_restarted",
+    "internal_error",
+]
+
+
+def _require_unit_interval(name: str, value: float) -> None:
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be between 0 and 1, got {value}.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +49,45 @@ class Finding:
     confidence: float
     evidence: tuple[EvidenceReference, ...]
 
+    def __post_init__(self) -> None:
+        _require_unit_interval("confidence", self.confidence)
+
+
+_NON_DIAGNOSTIC_FINDING_CODES = frozenset(
+    {
+        "gateway_icmp_no_response",
+        "gpu_metadata_only",
+        "insufficient_signal",
+        "proxy_enabled",
+        "stopped_automatic_services",
+    }
+)
+
+
+def is_diagnostic_finding(finding: Finding) -> bool:
+    return finding.code not in _NON_DIAGNOSTIC_FINDING_CODES and not finding.code.startswith(
+        "network_capability_"
+    )
+
+
+def diagnostic_findings(findings: tuple[Finding, ...]) -> tuple[Finding, ...]:
+    return tuple(finding for finding in findings if is_diagnostic_finding(finding))
+
+
+@dataclass(frozen=True, slots=True)
+class DiagnosisHypothesis:
+    id: str
+    key: str
+    hypothesis: str
+    rationale: str
+    supporting_evidence: tuple[EvidenceReference, ...]
+    contradicting_evidence: tuple[EvidenceReference, ...]
+    confidence: float
+    status: HypothesisStatus
+
+    def __post_init__(self) -> None:
+        _require_unit_interval("confidence", self.confidence)
+
 
 @dataclass(frozen=True, slots=True)
 class DiagnosisReport:
@@ -37,6 +98,10 @@ class DiagnosisReport:
     confidence: float
     limitations: tuple[str, ...]
     model_explanation: str
+    hypotheses: tuple[DiagnosisHypothesis, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_unit_interval("confidence", self.confidence)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +121,18 @@ class DiagnosisRecord:
     created_at: str
     completed_at: str | None
     schema_version: str
+    plan_confidence: float | None = None
+    planner_status: str | None = None
+    clarification_question: str | None = None
+    agent_round_count: int = 0
+    max_agent_rounds: int = 4
+    max_tool_calls: int = 8
+    stop_reason: StopReason | None = None
+
+    def __post_init__(self) -> None:
+        # `frozen=True` does not deep-freeze containers; copy each plan step mapping so a
+        # caller cannot mutate a record that has already been persisted.
+        object.__setattr__(self, "plan", tuple(dict(step) for step in self.plan))
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,3 +145,9 @@ class DiagnosisToolCall:
     result: object | None
     summary: dict[str, object] | None
     error_code: str | None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.summary is not None:
+            object.__setattr__(self, "summary", dict(self.summary))

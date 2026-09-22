@@ -1,25 +1,42 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from threading import Event
 from typing import Literal
 
 from sysmind.application.ports.scans import ScanRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.diagnostics import ScanRecord, StepStatus
 from sysmind.observability.logging import log_event
-from sysmind.tools.contracts import ToolCancelledError, ToolSpec, ToolUnavailableError
+from sysmind.tools.contracts import (
+    ToolCancelledError,
+    ToolPermissionError,
+    ToolSpec,
+    ToolUnavailableError,
+)
+from sysmind.tools.executor import AnyCancelEvent, arguments_hash
 from sysmind.tools.process import PROCESS_TOOL_SPECS, ProcessTools
 from sysmind.tools.system import SYSTEM_TOOL_SPECS, SystemTools
 
 SCAN_SCHEMA_VERSION = "1.0"
 _LOGGER = logging.getLogger(__name__)
 
+# Quick-scan probes are invoked with no parameters, so their normalized parameter hash is
+# the hash of an empty mapping. Recording it keeps the scan audit trail aligned with the
+# event-log trail, which always stores an arguments hash.
+NO_ARGUMENTS_HASH = arguments_hash({})
 
+# A crash used to leave a scan stranded as "interrupted" until the user started a
+# new one. These bounds keep the automatic retry from becoming a surprise: only
+# scans young enough to still describe the current machine are replayed, and only
+# a small number per startup so a backlog cannot flood the machine on launch.
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -35,12 +52,18 @@ def _serialize(value: object) -> object:
 
 
 def _failure(error: Exception) -> tuple[str, str, StepStatus]:
+    # Keep exception coverage aligned with LogAnalysisCoordinator._failure so the two
+    # coordinators report the same failure classes the same way.
     if isinstance(error, TimeoutError):
         return "tool_timeout", "采集步骤超时，已跳过该项。", "timed_out"
+    if isinstance(error, ToolPermissionError):
+        return "permission_required", str(error), "failed"
     if isinstance(error, ToolUnavailableError):
         return "capability_unavailable", str(error), "failed"
     if isinstance(error, ToolCancelledError):
         return "scan_cancelled", "扫描已取消。", "cancelled"
+    if isinstance(error, ValueError):
+        return "invalid_query", "采集参数不符合安全范围。", "failed"
     return "collection_failed", "该项系统信息暂时无法读取。", "failed"
 
 
@@ -84,6 +107,11 @@ class QuickScanCoordinator:
         return self._repository.recent(limit)
 
     def recover_interrupted(self) -> int:
+        """Mark orphaned scans as failed; do not auto-replay.
+
+        PRD/ADR require that an interrupted run terminates rather than silently
+        restarting collection. Users can start a new scan from the UI.
+        """
         return self._repository.mark_interrupted(_now())
 
     def cancel(self, scan_id: str) -> ScanRecord | None:
@@ -104,12 +132,16 @@ class QuickScanCoordinator:
         for task in pending:
             task.cancel()
 
-    async def _run(self, scan_id: str, cancellation: Event, correlation_id: str | None) -> None:
+    async def _run(
+        self,
+        scan_id: str,
+        cancellation: Event,
+        correlation_id: str | None,
+        collected_summary: dict[str, object],
+    ) -> None:
         specs = {spec.name: spec for spec in (*SYSTEM_TOOL_SPECS, *PROCESS_TOOL_SPECS)}
-        handlers = {
-            **self._system_tools.handlers(),
-            **self._process_tools.handlers(cancellation),
-        }
+        system_handlers = self._system_tools.handlers()
+        process_names = {spec.name for spec in PROCESS_TOOL_SPECS}
         result_keys = {
             "system.os": "operating_system",
             "system.cpu": "cpu",
@@ -119,13 +151,18 @@ class QuickScanCoordinator:
             "process.snapshot": "processes",
             "process.high_usage": "high_usage_processes",
         }
-        summary: dict[str, object] = {
-            "capabilities": _serialize(self._system_tools.capabilities()),
-        }
+        summary = collected_summary
+        summary.setdefault(
+            "capabilities", _serialize(self._system_tools.capabilities())
+        )
         failures: list[dict[str, str]] = []
         ordered_names = [spec.name for spec in (*SYSTEM_TOOL_SPECS, *PROCESS_TOOL_SPECS)]
         self._repository.update(
-            scan_id, status="running", progress=0, current_step=ordered_names[0]
+            scan_id,
+            status="running",
+            progress=0,
+            current_step=ordered_names[0],
+            summary=summary,
         )
         log_event(
             _LOGGER,
@@ -142,11 +179,21 @@ class QuickScanCoordinator:
                 self._finish_cancelled(scan_id, summary, failures)
                 return
             spec = specs[name]
+            # A fresh timeout event per step so signalling one timed-out worker cannot
+            # leak into the next step, while still combining with the scan-wide cancel.
+            step_timeout = Event()
+            if name in process_names:
+                handler = self._process_tools.handlers(
+                    AnyCancelEvent(cancellation, step_timeout)
+                )[name]
+            else:
+                handler = system_handlers[name]
             self._repository.update(
                 scan_id,
                 status="running",
                 progress=round(index / len(ordered_names) * 100),
                 current_step=name,
+                summary=summary,
             )
             started_at = _now()
             started = time.monotonic()
@@ -156,11 +203,15 @@ class QuickScanCoordinator:
             result_summary: dict[str, object] | None = None
             try:
                 value = await asyncio.wait_for(
-                    asyncio.to_thread(handlers[name]), timeout=spec.timeout_seconds
+                    asyncio.to_thread(handler), timeout=spec.timeout_seconds
                 )
                 summary[result_keys[name]] = _serialize(value)
                 result_summary = _result_summary(value)
             except Exception as error:
+                if isinstance(error, TimeoutError):
+                    # wait_for abandons the awaitable but the worker thread keeps
+                    # running; signal just this step so it can stop.
+                    step_timeout.set()
                 error_code, error_message, step_status = _failure(error)
                 failures.append({"tool": name, "code": error_code, "message": error_message})
             finished_at = _now()
@@ -179,16 +230,38 @@ class QuickScanCoordinator:
                 self._finish_cancelled(scan_id, summary, failures)
                 return
 
-        final_status: Literal["partial", "completed"] = "partial" if failures else "completed"
-        self._repository.update(
-            scan_id,
-            status=final_status,
-            progress=100,
-            current_step=None,
-            finished_at=_now(),
-            summary=summary,
-            failures=failures,
-        )
+        collected_any_result = any(key in summary for key in result_keys.values())
+        if failures and not collected_any_result:
+            final_status: Literal["partial", "completed", "failed"] = "failed"
+        elif failures:
+            final_status = "partial"
+        else:
+            final_status = "completed"
+        try:
+            self._repository.update(
+                scan_id,
+                status=final_status,
+                progress=100,
+                current_step=None,
+                finished_at=_now(),
+                summary=summary,
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )
+        except StateConflict:
+            # Cancel already finalized the scan; keep its result and collected data.
+            log_event(
+                _LOGGER,
+                logging.INFO,
+                "Quick scan finalize lost the terminal-state race.",
+                component="quick_scan",
+                event_type="scan_state_conflict",
+                correlation_id=correlation_id,
+                scan_id=scan_id,
+                requested_status=final_status,
+            )
+            self._cancellations.pop(scan_id, None)
+            return
         self._cancellations.pop(scan_id, None)
         log_event(
             _LOGGER,
@@ -208,12 +281,37 @@ class QuickScanCoordinator:
         cancellation: Event,
         correlation_id: str | None,
     ) -> None:
+        # Shared with _run so a CancelledError can still persist what was collected.
+        collected_summary: dict[str, object] = {}
         try:
-            await self._run(scan_id, cancellation, correlation_id)
+            async with asyncio.timeout(30):
+                await self._run(scan_id, cancellation, correlation_id, collected_summary)
         except asyncio.CancelledError:
             record = self._repository.get(scan_id)
             if record and record.status in {"queued", "running"}:
-                self._finish_cancelled(scan_id, record.summary or {}, record.failures)
+                self._finish_cancelled(scan_id, collected_summary, record.failures)
+        except TimeoutError:
+            cancellation.set()
+            record = self._repository.get(scan_id)
+            if record and record.status in {"queued", "running"}:
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        scan_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=[
+                            *record.failures,
+                            {
+                                "tool": "quick_scan",
+                                "code": "global_timeout",
+                                "message": "快速扫描达到 30 秒总预算，底层操作正在有界收尾。",
+                            },
+                        ],
+                        expected_statuses=("queued", "running"),
+                    )
         except Exception as error:
             record = self._repository.get(scan_id)
             if record and record.status in {"queued", "running"}:
@@ -225,15 +323,17 @@ class QuickScanCoordinator:
                         "message": "扫描任务意外中断。",
                     },
                 ]
-                self._repository.update(
-                    scan_id,
-                    status="failed",
-                    progress=record.progress,
-                    current_step=None,
-                    finished_at=_now(),
-                    summary=record.summary or {},
-                    failures=failures,
-                )
+                with contextlib.suppress(StateConflict):
+                    self._repository.update(
+                        scan_id,
+                        status="failed",
+                        progress=record.progress,
+                        current_step=None,
+                        finished_at=_now(),
+                        summary=record.summary or {},
+                        failures=failures,
+                        expected_statuses=("queued", "running"),
+                    )
             log_event(
                 _LOGGER,
                 logging.ERROR,
@@ -251,18 +351,20 @@ class QuickScanCoordinator:
         self,
         scan_id: str,
         summary: dict[str, object],
-        failures: list[dict[str, str]],
+        failures: Sequence[dict[str, str]],
     ) -> None:
         current = self._repository.get(scan_id)
-        self._repository.update(
-            scan_id,
-            status="cancelled",
-            progress=current.progress if current else 0,
-            current_step=None,
-            finished_at=_now(),
-            summary=summary,
-            failures=failures,
-        )
+        with contextlib.suppress(StateConflict):
+            self._repository.update(
+                scan_id,
+                status="cancelled",
+                progress=current.progress if current else 0,
+                current_step=None,
+                finished_at=_now(),
+                summary=summary,
+                failures=failures,
+                expected_statuses=("queued", "running"),
+            )
         self._cancellations.pop(scan_id, None)
 
     def _record_event(
@@ -282,6 +384,7 @@ class QuickScanCoordinator:
             scan_id=scan_id,
             tool_name=spec.name,
             tool_version=spec.version,
+            arguments_hash=NO_ARGUMENTS_HASH,
             status=status,
             started_at=started_at,
             finished_at=finished_at,

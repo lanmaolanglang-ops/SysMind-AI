@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiClientError, type ApiClient, type SseEvent } from "../../services/api-client";
 import {
   cancelAgentTask,
+  agentTaskReconnectDelay,
   getAgentTask,
   getRecentAgentTasks,
   getToolCatalog,
@@ -26,8 +27,8 @@ const STATUS_COPY: Record<string, string> = {
   created: "任务已创建",
   planning: "正在规划受限步骤",
   running_tools: "正在运行只读工具",
-  analyzing: "正在调用离线模拟 Provider",
-  waiting_user_input: "任务需要更多信息",
+  analyzing: "正在调用受控 Provider",
+  waiting_user_input: "需要补充信息后新建任务",
   completed: "Agent Runtime 自检完成",
   cancelling: "正在取消任务",
   cancelled: "任务已取消",
@@ -65,8 +66,13 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastEventId = useRef<string | undefined>(undefined);
+  const activeTaskIdRef = useRef<string | null>(null);
   const active = task !== null && !TERMINAL.has(task.status);
   const activeTaskId = active ? task.id : null;
+
+  useEffect(() => {
+    activeTaskIdRef.current = activeTaskId;
+  }, [activeTaskId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -86,14 +92,19 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
 
   useEffect(() => {
     if (!activeTaskId) return;
+    const expectedTaskId = activeTaskId;
     const controller = new AbortController();
     const follow = async () => {
+      let failedAttempts = 0;
       while (!controller.signal.aborted) {
         try {
           await streamAgentTaskEvents(
             client,
             activeTaskId,
             (event) => {
+              // A stream that belonged to a previous task can deliver one last event
+              // just before it is aborted; never merge it into the active task's state.
+              if (expectedTaskId !== activeTaskIdRef.current) return;
               if (event.id) lastEventId.current = event.id;
               setEvents((current) => {
                 if (event.id && current.some((item) => item.id === event.id)) return current;
@@ -101,7 +112,7 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
               });
               if (event.data.status || event.data.progress !== undefined) {
                 setTask((current) =>
-                  current
+                  current && current.id === expectedTaskId
                     ? {
                         ...current,
                         ...(event.data.status ? { status: event.data.status } : {}),
@@ -118,14 +129,18 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
           );
           if (controller.signal.aborted) return;
           const latest = await getAgentTask(client, activeTaskId, controller.signal);
+          if (expectedTaskId !== activeTaskIdRef.current) return;
           setTask(latest);
           setError(null);
+          failedAttempts = 0;
           if (TERMINAL.has(latest.status)) return;
         } catch (reason: unknown) {
           if (controller.signal.aborted) return;
           setError(errorCopy(reason));
+          failedAttempts += 1;
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 350));
+        const delay = agentTaskReconnectDelay(failedAttempts || 1);
+        await new Promise((resolve) => window.setTimeout(resolve, delay));
       }
     };
     void follow();
@@ -165,11 +180,11 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
       <div className="agent-heading">
         <div>
           <h2 id="agent-runtime-title">受限 Agent Runtime</h2>
-          <p>
-            Phase 3 使用离线 Fake Provider 验证预算、工具白名单、SSE 和审计；这里不会生成诊断报告。
-          </p>
+          <p>Provider 只能在预算内调用版本化只读工具；这里不会生成诊断报告或执行状态变更。</p>
         </div>
-        <span className="runtime-badge">Fake Provider · 离线</span>
+        <span className="runtime-badge">
+          {task?.provider === "openai_compatible" ? "真实 Provider" : "Fake Provider · 离线"}
+        </span>
       </div>
 
       <label className="agent-goal">
@@ -218,6 +233,19 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
           </button>
         )}
       </div>
+
+      {task?.status === "waiting_user_input" && (
+        <button
+          type="button"
+          onClick={() => {
+            setGoal((current) => `${current}\n补充信息：`);
+            setTask(null);
+            setEvents([]);
+          }}
+        >
+          带入上下文新建任务
+        </button>
+      )}
 
       {(events.length > 0 || (task && TERMINAL.has(task.status))) && (
         <div className="agent-results">

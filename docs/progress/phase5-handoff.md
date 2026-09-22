@@ -1,7 +1,7 @@
 # SysMind AI Phase 5 交接说明
 
 更新时间：2026-08-20
-工作区：`D:\SysMind AI`
+工作区：仓库根目录
 
 Phase 2 至 Phase 5 位于同一批未提交工作中。不得重置、清理或覆盖这些文件；开始后续工作前
 阅读 `AGENTS.md`、PRD、ADR-007 至 ADR-011，以及 `docs/progress/phase5-complete.md`。

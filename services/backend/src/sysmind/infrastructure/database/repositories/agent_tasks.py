@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.application.ports.agent_tasks import AgentTaskRepository
+from sysmind.application.ports.state_conflict import StateConflict
 from sysmind.domain.agent_tasks import (
     AgentBudget,
     AgentEventType,
@@ -17,6 +20,7 @@ from sysmind.domain.agent_tasks import (
     AgentTaskStatus,
     AgentToolCallRecord,
 )
+from sysmind.infrastructure.database.cas import allowed_source_statuses
 from sysmind.infrastructure.database.models import (
     AgentModelCall,
     AgentTask,
@@ -24,29 +28,46 @@ from sysmind.infrastructure.database.models import (
     AgentToolCall,
 )
 
+_TERMINAL_STATUSES = frozenset({"completed", "cancelled", "failed", "timed_out", "interrupted"})
+_NON_TERMINAL_STATUSES = frozenset(
+    {"created", "planning", "running_tools", "analyzing", "waiting_user_input", "cancelling"}
+)
+_ACTIVE_STATUSES = frozenset({"created", "planning", "running_tools", "analyzing"})
+
 
 def _parse_time(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+def _loads(raw: str | None, default: object) -> object:
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 def _task_record(model: AgentTask) -> AgentTaskRecord:
-    budget_data = cast(dict[str, object], json.loads(model.budget_json))
+    budget_data = cast(dict[str, object], _loads(model.budget_json, {}))
+    allowed_tools = cast(list[str], _loads(model.allowed_tools_json, []))
+    working_summary = cast(dict[str, object], _loads(model.working_summary_json, {}))
     return AgentTaskRecord(
         id=model.id,
         status=cast(AgentTaskStatus, model.status),
         user_goal=model.user_goal,
         provider=model.provider,
-        allowed_tools=tuple(cast(list[str], json.loads(model.allowed_tools_json))),
+        allowed_tools=tuple(allowed_tools),
         budget=AgentBudget(
-            max_rounds=cast(int, budget_data["max_rounds"]),
-            max_tool_calls=cast(int, budget_data["max_tool_calls"]),
-            timeout_seconds=cast(float, budget_data["timeout_seconds"]),
-            max_parallel_tools=cast(int, budget_data["max_parallel_tools"]),
+            max_rounds=cast(int, budget_data.get("max_rounds", 4)),
+            max_tool_calls=cast(int, budget_data.get("max_tool_calls", 8)),
+            timeout_seconds=cast(float, budget_data.get("timeout_seconds", 30.0)),
+            max_parallel_tools=cast(int, budget_data.get("max_parallel_tools", 2)),
         ),
         current_round=model.current_round,
         tool_call_count=model.tool_call_count,
         progress=model.progress,
-        working_summary=cast(dict[str, object], json.loads(model.working_summary_json)),
+        working_summary=working_summary,
         final_output=model.final_output,
         failure_code=model.failure_code,
         failure_message=model.failure_message,
@@ -63,7 +84,7 @@ def _event_record(model: AgentTaskEventModel) -> AgentTaskEvent:
         id=model.id,
         task_id=model.task_id,
         event_type=cast(AgentEventType, model.event_type),
-        data=cast(dict[str, object], json.loads(model.data_json)),
+        data=cast(dict[str, object], _loads(model.data_json, {})),
         created_at=model.created_at.isoformat(),
     )
 
@@ -82,7 +103,7 @@ def _tool_record(model: AgentToolCall) -> AgentToolCallRecord:
         finished_at=model.finished_at.isoformat() if model.finished_at else None,
         duration_ms=model.duration_ms,
         result_summary=(
-            cast(dict[str, object], json.loads(model.result_summary_json))
+            cast(dict[str, object], _loads(model.result_summary_json, {}))
             if model.result_summary_json
             else None
         ),
@@ -141,39 +162,70 @@ class SqlAlchemyAgentTaskRepository(AgentTaskRepository):
         failure_code: str | None = None,
         failure_message: str | None = None,
         cancel_requested: bool | None = None,
+        expected_statuses: Sequence[AgentTaskStatus] | None = None,
     ) -> AgentTaskRecord:
+        allowed = allowed_source_statuses(
+            target_status=status,
+            non_terminal=_NON_TERMINAL_STATUSES,
+            terminal=_TERMINAL_STATUSES,
+            expected=expected_statuses,
+        )
+        values: dict[str, object] = {
+            "status": status,
+            "current_round": current_round,
+            "tool_call_count": tool_call_count,
+            "progress": progress,
+            "working_summary_json": json.dumps(working_summary, ensure_ascii=False),
+        }
+        if started_at is not None:
+            values["started_at"] = _parse_time(started_at)
+        if finished_at is not None:
+            values["finished_at"] = _parse_time(finished_at)
+        if final_output is not None:
+            values["final_output"] = final_output
+        if failure_code is not None:
+            values["failure_code"] = failure_code
+        if failure_message is not None:
+            values["failure_message"] = failure_message
+        if cancel_requested is not None:
+            values["cancel_requested"] = cancel_requested
         with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(AgentTask)
+                    .where(AgentTask.id == task_id, AgentTask.status.in_(allowed))
+                    .values(**values)
+                ),
+            )
             model = session.get(AgentTask, task_id)
             if model is None:
                 raise KeyError(task_id)
-            model.status = status
-            model.current_round = current_round
-            model.tool_call_count = tool_call_count
-            model.progress = progress
-            model.working_summary_json = json.dumps(working_summary, ensure_ascii=False)
-            if started_at is not None:
-                model.started_at = _parse_time(started_at)
-            if finished_at is not None:
-                model.finished_at = _parse_time(finished_at)
-            if final_output is not None:
-                model.final_output = final_output
-            if failure_code is not None:
-                model.failure_code = failure_code
-            if failure_message is not None:
-                model.failure_message = failure_message
-            if cancel_requested is not None:
-                model.cancel_requested = cancel_requested
-        return _task_record(model)
+            if result.rowcount != 1 and (
+                expected_statuses is not None
+                or status in _TERMINAL_STATUSES
+                and model.status != status
+            ):
+                raise StateConflict(task_id, expected=allowed, actual=model.status)
+            return _task_record(model)
 
     def request_cancel(self, task_id: str) -> AgentTaskRecord | None:
         with self._sessions.begin() as session:
             model = session.get(AgentTask, task_id)
             if model is None:
                 return None
-            model.cancel_requested = True
-            if model.status in {"created", "planning", "running_tools", "analyzing"}:
-                model.status = "cancelling"
-        return _task_record(model)
+            # Record the cancellation request for every non-missing task (audit);
+            # only active runs flip to ``cancelling``.
+            session.execute(
+                update(AgentTask).where(AgentTask.id == task_id).values(cancel_requested=True)
+            )
+            session.execute(
+                update(AgentTask)
+                .where(AgentTask.id == task_id, AgentTask.status.in_(tuple(_ACTIVE_STATUSES)))
+                .values(status="cancelling", cancel_requested=True)
+            )
+            session.expire(model)
+            return _task_record(model)
 
     def get(self, task_id: str) -> AgentTaskRecord | None:
         with self._sessions() as session:
@@ -224,7 +276,7 @@ class SqlAlchemyAgentTaskRepository(AgentTaskRepository):
         provider_call_id: str,
         tool_name: str,
         tool_version: str,
-        arguments: dict[str, object],
+        redacted_arguments: dict[str, object],
         arguments_hash: str,
         risk_level: str,
         started_at: str,
@@ -237,7 +289,7 @@ class SqlAlchemyAgentTaskRepository(AgentTaskRepository):
                     provider_call_id=provider_call_id,
                     tool_name=tool_name,
                     tool_version=tool_version,
-                    arguments_json=json.dumps(arguments, ensure_ascii=False),
+                    arguments_json=json.dumps(redacted_arguments, ensure_ascii=False),
                     arguments_hash=arguments_hash,
                     risk_level=risk_level,
                     status="running",

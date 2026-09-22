@@ -24,7 +24,8 @@ State-changing execution is isolated from the model-facing Agent Tool Executor. 
 derived from a completed diagnosis containing startup evidence. The desktop displays the exact
 target and effect, then records a per-action decision. Confirmation creates an authenticated,
 single-use ticket bound to action, tool, target hash, observed revision, sidecar session, nonce, and
-a maximum two-minute lifetime. Only the ticket digest is persisted. Execution consumes the ticket
+a maximum two-minute lifetime (ConsentService default TTL 120s; process-action tickets are further
+  capped to the remaining 30-second plan window). Only the ticket digest is persisted. Execution consumes the ticket
 atomically, re-reads target identity, creates local recovery material, changes one item, and verifies
 the result with a fresh read. Restarted actions are marked interrupted and never replayed.
 

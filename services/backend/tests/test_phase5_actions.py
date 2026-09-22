@@ -7,178 +7,21 @@ from pathlib import Path
 import psutil
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 
-from sysmind.actions import ActionCoordinator, ActionError
+from sysmind.actions import ActionError
+from sysmind.actions.coordinator import PROCESS_PLAN_WINDOW_SECONDS
+from sysmind.api.dto.actions import ActionResponse
+from sysmind.application.ports.actions import ActionStateConflict
 from sysmind.domain.actions import (
-    MutationResult,
-    ProcessActionCandidate,
     StartupActionCandidate,
 )
-from sysmind.infrastructure.database import create_session_factory, run_migrations
-from sysmind.infrastructure.database.models import ActionModel, Diagnosis, DiagnosisToolCallModel
-from sysmind.infrastructure.database.repositories import (
-    SqlAlchemyActionRepository,
-    SqlAlchemyDiagnosisRepository,
-)
-from sysmind.security import ConsentService
+from sysmind.infrastructure.database import create_session_factory
+from sysmind.infrastructure.database.models import ActionModel, DiagnosisToolCallModel
+from sysmind.infrastructure.database.repositories import SqlAlchemyActionRepository
 from sysmind.tools.contracts import ToolUnavailableError
 from sysmind.windows.process_actions import WindowsProcessActionAdapter
-from sysmind.windows.startup_actions import TargetChangedError
-
-
-class FakeStartupActions:
-    def __init__(self) -> None:
-        self.item = StartupActionCandidate("a" * 64, "Example", "user_run", "example.exe", "b" * 64)
-        self.enabled = True
-        self.recoveries: set[str] = set()
-
-    def candidates(self) -> tuple[StartupActionCandidate, ...]:
-        return (self.item,) if self.enabled else ()
-
-    def disable(self, item_id: str, observed_revision: str) -> MutationResult:
-        if (
-            not self.enabled
-            or item_id != self.item.item_id
-            or observed_revision != self.item.observed_revision
-        ):
-            raise TargetChangedError("changed")
-        self.enabled = False
-        self.recoveries.add("recovery-1")
-        return MutationResult("recovery-1", None)
-
-    def restore(self, recovery_id: str) -> MutationResult:
-        if recovery_id not in self.recoveries or self.enabled:
-            raise TargetChangedError("changed")
-        self.recoveries.remove(recovery_id)
-        self.enabled = True
-        return MutationResult(None, self.item.observed_revision)
-
-    def recovery_exists(self, recovery_id: str) -> bool:
-        return recovery_id in self.recoveries
-
-
-class FakeProcessActions:
-    def __init__(self, outcome: str = "closed") -> None:
-        self.item = ProcessActionCandidate(
-            "d" * 64,
-            "Editor.exe",
-            "current_user_process",
-            "editor.exe",
-            "e" * 64,
-            4242,
-            42.0,
-            12.0,
-        )
-        self.outcome = outcome
-        self.calls = 0
-        self.terminate_calls = 0
-
-    def candidates(self) -> tuple[ProcessActionCandidate, ...]:
-        return (self.item,)
-
-    def request_close(self, item_id: str, observed_revision: str) -> MutationResult:
-        if item_id != self.item.item_id or observed_revision != self.item.observed_revision:
-            raise TargetChangedError("changed")
-        self.calls += 1
-        return MutationResult(None, None, self.outcome)
-
-    def terminate(self, item_id: str, observed_revision: str) -> MutationResult:
-        if item_id != self.item.item_id or observed_revision != self.item.observed_revision:
-            raise TargetChangedError("changed")
-        self.terminate_calls += 1
-        return MutationResult(None, None, "terminated")
-
-
-def coordinator(
-    tmp_path: Path,
-    process_adapter: FakeProcessActions | None = None,
-    *,
-    diagnosis_id: str = "diagnosis-ready",
-) -> tuple[ActionCoordinator, FakeStartupActions]:
-    database_url = f"sqlite:///{(tmp_path / 'actions.db').as_posix()}"
-    run_migrations(database_url)
-    sessions = create_session_factory(database_url)
-    now = datetime.now(UTC)
-    with sessions.begin() as session:
-        session.add(
-            Diagnosis(
-                id=diagnosis_id,
-                status="completed",
-                user_question="slow",
-                category="performance",
-                provider="fake",
-                plan_json="[]",
-                progress=100,
-                created_at=now,
-                completed_at=now,
-                report_json=json.dumps(
-                    {
-                        "schema_version": "1.0",
-                        "summary": "high usage",
-                        "category": "performance",
-                        "findings": [
-                            {
-                                "id": "finding-process",
-                                "code": "resource_competition",
-                                "severity": "medium",
-                                "title": "high usage",
-                                "explanation": "evidence",
-                                "recommendation": "review",
-                                "confidence": 0.8,
-                                "evidence": [
-                                    {
-                                        "tool_call_id": "process-call",
-                                        "field_path": "$",
-                                    }
-                                ],
-                            }
-                        ],
-                        "confidence": 0.8,
-                        "limitations": [],
-                        "model_explanation": "local",
-                    }
-                ),
-                schema_version="1.0",
-            )
-        )
-        session.add(
-            DiagnosisToolCallModel(
-                id="startup-call",
-                diagnosis_id=diagnosis_id,
-                tool_name="startup.analyze",
-                tool_version="1.0",
-                arguments_json="{}",
-                arguments_hash="c" * 64,
-                status="completed",
-                result_json="{}",
-                started_at=now,
-                finished_at=now,
-                duration_ms=1,
-            )
-        )
-        session.add(
-            DiagnosisToolCallModel(
-                id="process-call",
-                diagnosis_id=diagnosis_id,
-                tool_name="process.high_usage",
-                tool_version="1.0",
-                arguments_json="{}",
-                arguments_hash="f" * 64,
-                status="completed",
-                result_json=json.dumps([{"pid": 4242, "name": "Editor.exe"}]),
-                started_at=now,
-                finished_at=now,
-                duration_ms=1,
-            )
-        )
-    adapter = FakeStartupActions()
-    return ActionCoordinator(
-        SqlAlchemyActionRepository(sessions),
-        SqlAlchemyDiagnosisRepository(sessions),
-        adapter,
-        ConsentService("session"),
-        process_adapter,
-    ), adapter
+from tests.fakes.actions import FakeProcessActions, coordinator
 
 
 def test_disable_requires_bound_single_use_consent_and_can_recover(tmp_path: Path) -> None:
@@ -224,10 +67,89 @@ def test_target_revision_change_fails_closed(tmp_path: Path) -> None:
     assert result.status == "target_changed"
 
 
+def test_action_repository_rejects_stale_status_transition(tmp_path: Path) -> None:
+    service, _adapter = coordinator(tmp_path)
+    candidate = service.candidates("diagnosis-ready")[0]
+    action = service.create_disable(
+        "diagnosis-ready", candidate.item_id, candidate.observed_revision
+    )
+    repository = SqlAlchemyActionRepository(
+        create_session_factory(f"sqlite:///{(tmp_path / 'actions.db').as_posix()}")
+    )
+
+    with pytest.raises(ActionStateConflict):
+        repository.set_status(
+            action.id,
+            expected_statuses=("confirmed",),
+            status="executing",
+            updated_at=datetime.now(UTC).isoformat(),
+        )
+
+    persisted = repository.get(action.id)
+    assert persisted is not None and persisted.status == "proposed"
+
+
+def test_disable_verification_failure_keeps_recovery_chain(tmp_path: Path) -> None:
+    service, adapter = coordinator(tmp_path)
+    adapter.fail_verification = True
+    candidate = service.candidates("diagnosis-ready")[0]
+    action = service.create_disable(
+        "diagnosis-ready", candidate.item_id, candidate.observed_revision
+    )
+    _confirmed, ticket, _expires = service.confirm(action.id)
+
+    result = service.execute(action.id, ticket)
+
+    assert result.status == "verification_failed"
+    assert result.recovery_id == "recovery-1"
+    assert adapter.recovery_exists("recovery-1")
+    assert ActionResponse.from_record(result).recovery_available is True
+
+    restore = service.create_restore(result.id)
+    _confirmed, restore_ticket, _expires = service.confirm(restore.id)
+    restored = service.execute(restore.id, restore_ticket)
+    assert restored.status == "succeeded"
+    assert adapter.enabled is True
+
+
 def test_diagnosis_without_startup_evidence_is_rejected(tmp_path: Path) -> None:
     service, _adapter = coordinator(tmp_path)
     with pytest.raises(ActionError, match="completed diagnosis"):
         service.candidates("missing")
+
+
+def test_startup_candidates_fail_closed_when_legacy_evidence_has_no_item_id(
+    tmp_path: Path,
+) -> None:
+    service, _adapter = coordinator(tmp_path)
+    sessions = create_session_factory(f"sqlite:///{(tmp_path / 'actions.db').as_posix()}")
+    with sessions.begin() as session:
+        session.execute(
+            update(DiagnosisToolCallModel)
+            .where(DiagnosisToolCallModel.id == "startup-call")
+            .values(result_json=json.dumps({"items": [{"name": "Example"}]}))
+        )
+
+    with pytest.raises(ActionError) as error:
+        service.candidates("diagnosis-ready")
+    assert error.value.code == "startup_evidence_required"
+
+
+def test_process_candidates_fail_closed_when_evidence_only_contains_pid(
+    tmp_path: Path,
+) -> None:
+    service, _adapter = coordinator(tmp_path, FakeProcessActions())
+    sessions = create_session_factory(f"sqlite:///{(tmp_path / 'actions.db').as_posix()}")
+    with sessions.begin() as session:
+        session.execute(
+            update(DiagnosisToolCallModel)
+            .where(DiagnosisToolCallModel.id == "process-call")
+            .values(result_json=json.dumps([{"pid": 4242, "name": "Editor.exe"}]))
+        )
+
+    with pytest.raises(ActionError) as error:
+        service.process_candidates("diagnosis-ready")
+    assert error.value.code == "process_evidence_required"
 
 
 @pytest.mark.parametrize(
@@ -264,7 +186,7 @@ def test_process_close_plan_expires_before_execution(tmp_path: Path) -> None:
     with sessions.begin() as session:
         model = session.get(ActionModel, action.id)
         assert model is not None
-        model.created_at = datetime.now(UTC) - timedelta(seconds=31)
+        model.created_at = datetime.now(UTC) - timedelta(seconds=PROCESS_PLAN_WINDOW_SECONDS + 1)
 
     result = service.execute(action.id, ticket)
     assert result.status == "target_changed"
@@ -354,7 +276,7 @@ def test_second_termination_confirmation_expires_with_plan(tmp_path: Path) -> No
     with sessions.begin() as session:
         model = session.get(ActionModel, termination.id)
         assert model is not None
-        model.created_at = datetime.now(UTC) - timedelta(seconds=31)
+        model.created_at = datetime.now(UTC) - timedelta(seconds=PROCESS_PLAN_WINDOW_SECONDS + 1)
 
     with pytest.raises(ActionError) as error:
         service.confirm(stage_one.id)
@@ -375,6 +297,55 @@ def test_process_post_state_access_denied_is_not_reported_as_closed(
     monkeypatch.setattr(psutil, "Process", denied)
     with pytest.raises(ToolUnavailableError, match="could not be verified"):
         WindowsProcessActionAdapter()._same_process(candidate)
+
+
+def test_process_candidates_only_sample_visible_pids_and_normalize_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeProcess:
+        def __init__(self, pid: int) -> None:
+            self.pid = pid
+            self._cpu_calls = 0
+
+        def as_dict(self, attrs: object) -> dict[str, object]:
+            del attrs
+            return {
+                "pid": self.pid,
+                "name": "Editor.exe",
+                "create_time": 100.0,
+                "exe": r"C:\Program Files\Editor\Editor.exe",
+            }
+
+        def cpu_percent(self, interval: object = None) -> float:
+            del interval
+            self._cpu_calls += 1
+            return 0.0 if self._cpu_calls == 1 else 320.0
+
+        def memory_percent(self) -> float:
+            return 5.0
+
+    adapter = WindowsProcessActionAdapter()
+    constructed: list[int] = []
+
+    def process(pid: int) -> FakeProcess:
+        constructed.append(pid)
+        return FakeProcess(pid)
+
+    monkeypatch.setattr("sysmind.windows.process_actions.os.name", "nt")
+    monkeypatch.setattr(adapter, "_visible_windows", lambda: {42: (1001,)})
+    monkeypatch.setattr(adapter, "_process_sid", lambda _pid: "S-1-fixture")
+    monkeypatch.setattr(adapter, "_session_id", lambda _pid: 1)
+    monkeypatch.setattr(adapter, "_elevation_type", lambda _pid: 1)
+    monkeypatch.setattr(adapter, "_sysmind_process_tree", lambda: set())
+    monkeypatch.setattr(adapter, "_is_critical", lambda _pid: False)
+    monkeypatch.setattr("sysmind.windows.process_actions.psutil.Process", process)
+    monkeypatch.setattr("sysmind.windows.diagnostics.psutil.cpu_count", lambda logical=True: 8)
+    monkeypatch.setattr("sysmind.windows.process_actions.time.sleep", lambda _seconds: None)
+
+    candidates = adapter.candidates()
+
+    assert constructed == [42]
+    assert candidates[0].cpu_percent == 40.0
 
 
 def test_process_action_api_preserves_pending_and_double_confirmation_contract(

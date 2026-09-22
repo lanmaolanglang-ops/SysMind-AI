@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from sysmind.domain.diagnostics import ScanRecord, ScanStatus, StepStatus
@@ -17,8 +18,21 @@ class ScanRepository(Protocol):
         current_step: str | None,
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
-        failures: list[dict[str, str]] | None = None,
-    ) -> ScanRecord: ...
+        failures: Sequence[dict[str, str]] | None = None,
+        expected_statuses: Sequence[ScanStatus] | None = None,
+    ) -> ScanRecord:
+        """Compare-and-set update a scan.
+
+        ``failures=None`` means "leave the stored failures unchanged"; pass a
+        sequence (possibly empty) to replace them.
+
+        When ``expected_statuses`` is provided the write only succeeds if the
+        stored status is one of them; otherwise
+        ``sysmind.application.ports.state_conflict.StateConflict`` is raised.
+        Without it, a non-terminal write cannot revive a terminal scan, and a
+        terminal write cannot overwrite a *different* terminal status.
+        """
+        ...
 
     def add_step_event(
         self,
@@ -26,6 +40,7 @@ class ScanRepository(Protocol):
         scan_id: str,
         tool_name: str,
         tool_version: str,
+        arguments_hash: str,
         status: StepStatus,
         started_at: str,
         finished_at: str,
@@ -39,4 +54,10 @@ class ScanRepository(Protocol):
 
     def recent(self, limit: int = 20) -> list[ScanRecord]: ...
 
-    def mark_interrupted(self, finished_at: str) -> int: ...
+    def mark_interrupted(self, finished_at: str) -> int:
+        """Mark in-flight scans after a backend restart.
+
+        Contract: terminal ``status="failed"`` and append a failure with
+        ``code="backend_restarted"``. Returns the number of records updated.
+        """
+        ...

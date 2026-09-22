@@ -35,6 +35,13 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Agent session state and empty scratch files produced by local tooling.
+.workbuddy/
+_tmp_*
+
 # Impeccable durable design metadata is tracked; rendered review output is transient.
 .impeccable/review/
 .impeccable/mocks/
+.impeccable/critique/
+apps/**/.impeccable/
+.coverage

@@ -106,9 +106,9 @@ def build_runtime_registry(
 
         return handler
 
-    def snapshot(input_model: BaseModel, _cancel: Event) -> object:
+    def snapshot(input_model: BaseModel, cancel: Event) -> object:
         parameters = cast(ProcessSnapshotInput, input_model)
-        return process_probe.snapshot(limit=parameters.limit)
+        return process_probe.snapshot(limit=parameters.limit, cancel_event=cancel)
 
     def high_usage(input_model: BaseModel, cancel: Event) -> object:
         parameters = cast(HighUsageInput, input_model)

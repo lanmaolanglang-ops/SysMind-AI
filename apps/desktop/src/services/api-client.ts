@@ -55,17 +55,31 @@ export class ApiClient {
     return this.#request<T>("POST", path, signal);
   }
 
-  async postJson<T, TBody>(path: string, body: TBody, signal?: AbortSignal): Promise<T> {
-    return this.#request<T>("POST", path, signal, body);
+  async putJson<T, TBody>(path: string, body: TBody, signal?: AbortSignal): Promise<T> {
+    return this.#request<T>("PUT", path, signal, body);
+  }
+
+  async delete<T>(path: string, signal?: AbortSignal): Promise<T> {
+    return this.#request<T>("DELETE", path, signal);
+  }
+
+  async postJson<T, TBody>(
+    path: string,
+    body: TBody,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<T> {
+    return this.#request<T>("POST", path, signal, body, timeoutMs);
   }
 
   async download(path: string, signal?: AbortSignal): Promise<Blob> {
+    const correlationId = crypto.randomUUID();
     const timeout = AbortSignal.timeout(this.#timeoutMs);
     const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const response = await fetch(`${this.#baseUrl}${path}`, {
       headers: {
         Accept: "application/octet-stream",
-        "X-Correlation-ID": crypto.randomUUID(),
+        "X-Correlation-ID": correlationId,
         "X-SysMind-Session": this.#sessionToken,
       },
       signal: combinedSignal,
@@ -73,9 +87,14 @@ export class ApiClient {
     if (!response.ok) {
       throw new ApiClientError("download_error", "Report export was unavailable.", {
         status: response.status,
+        correlationId: response.headers.get("X-Correlation-ID") ?? correlationId,
       });
     }
-    return response.blob();
+    // Rebuild the Blob in the current realm so it is an instance of the ambient Blob
+    // type (jsdom in tests, the browser at runtime) and carries an explicit content type.
+    const contentType = response.headers.get("Content-Type") ?? "application/octet-stream";
+    const data = await response.arrayBuffer();
+    return new Blob([data], { type: contentType });
   }
 
   async streamSse<TData>(
@@ -115,7 +134,10 @@ export class ApiClient {
     let buffer = "";
     while (true) {
       const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done }).replaceAll("\r\n", "\n");
+      buffer += decoder.decode(value, { stream: !done });
+      // Normalize the whole pending buffer, not just the latest chunk, so a CRLF pair
+      // split across two chunks is still collapsed.
+      buffer = buffer.replaceAll("\r\n", "\n");
       let boundary = buffer.indexOf("\n\n");
       while (boundary >= 0) {
         const block = buffer.slice(0, boundary);
@@ -124,17 +146,26 @@ export class ApiClient {
         if (parsed) onEvent(parsed);
         boundary = buffer.indexOf("\n\n");
       }
-      if (done) break;
+      if (done) {
+        // A stream may end without a trailing blank line; flush any complete final event.
+        const trailing = buffer.trim();
+        if (trailing) {
+          const parsed = this.#parseSseBlock<TData>(trailing);
+          if (parsed) onEvent(parsed);
+        }
+        break;
+      }
     }
   }
 
   async #request<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
     signal?: AbortSignal,
     body?: unknown,
+    timeoutMs?: number,
   ): Promise<T> {
-    const timeout = AbortSignal.timeout(this.#timeoutMs);
+    const timeout = AbortSignal.timeout(timeoutMs ?? this.#timeoutMs);
     const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const correlationId = crypto.randomUUID();
 
@@ -169,7 +200,20 @@ export class ApiClient {
         );
       }
 
-      return (await response.json()) as T;
+      // A 204 or empty body is a valid success response (e.g. delete/shutdown); do not
+      // let response.json() throw a SyntaxError that would be misread as a network error.
+      if (response.status === 204) return undefined as T;
+      const payload = await response.text();
+      if (!payload) return undefined as T;
+      try {
+        return JSON.parse(payload) as T;
+      } catch (error: unknown) {
+        throw new ApiClientError(
+          "invalid_response",
+          "Local API returned an invalid response.",
+          { status: response.status, correlationId: responseCorrelationId, cause: error },
+        );
+      }
     } catch (error: unknown) {
       if (error instanceof ApiClientError) throw error;
       if (error instanceof DOMException && error.name === "AbortError") {

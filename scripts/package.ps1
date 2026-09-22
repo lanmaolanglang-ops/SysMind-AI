@@ -13,7 +13,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-
+# Windows PowerShell 5.1 does not define $IsWindows; StrictMode would fail the check below.
+if (-not (Test-Path variable:IsWindows)) {
+    Set-Variable -Name IsWindows -Value $true -Scope Global -Force
+}
 if (-not $IsWindows -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
     throw 'Phase 6 packages must be built on Windows x64.'
 }
@@ -136,11 +139,19 @@ if ($Release) {
 $overlay | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $overlayPath -Encoding utf8
 
 Push-Location $desktopRoot
+$previousUpdaterAvailability = $env:VITE_SYSMIND_UPDATER_AVAILABLE
 try {
+    $env:VITE_SYSMIND_UPDATER_AVAILABLE = if ($Release) { 'true' } else { 'false' }
     pnpm exec tauri build --config $overlayPath
     if ($LASTEXITCODE -ne 0) { throw "Tauri bundle failed with exit code $LASTEXITCODE." }
 }
 finally {
+    if ($null -eq $previousUpdaterAvailability) {
+        Remove-Item Env:VITE_SYSMIND_UPDATER_AVAILABLE -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:VITE_SYSMIND_UPDATER_AVAILABLE = $previousUpdaterAvailability
+    }
     Pop-Location
 }
 

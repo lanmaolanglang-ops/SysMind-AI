@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from sysmind.domain.diagnostics import StepStatus
@@ -20,8 +21,20 @@ class LogAnalysisRepository(Protocol):
         current_step: str | None,
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
-        failures: list[dict[str, str]] | None = None,
-    ) -> LogAnalysisRecord: ...
+        failures: Sequence[dict[str, str]] | None = None,
+        expected_statuses: Sequence[AnalysisStatus] | None = None,
+    ) -> LogAnalysisRecord:
+        """Compare-and-set update a log analysis.
+
+        ``failures=None`` means "leave the stored failures unchanged"; pass a
+        sequence (possibly empty) to replace them.
+
+        When ``expected_statuses`` is provided the write only succeeds if the
+        stored status is one of them; otherwise ``StateConflict`` is raised.
+        Without it, a non-terminal write cannot revive a terminal analysis, and
+        a terminal write cannot overwrite a *different* terminal status.
+        """
+        ...
 
     def add_step_event(
         self,
@@ -43,4 +56,10 @@ class LogAnalysisRepository(Protocol):
 
     def recent(self, limit: int = 20) -> list[LogAnalysisRecord]: ...
 
-    def mark_interrupted(self, finished_at: str) -> int: ...
+    def mark_interrupted(self, finished_at: str) -> int:
+        """Mark in-flight analyses after a backend restart.
+
+        Contract: terminal ``status="failed"`` and append a failure with
+        ``code="backend_restarted"``. Returns the number of records updated.
+        """
+        ...

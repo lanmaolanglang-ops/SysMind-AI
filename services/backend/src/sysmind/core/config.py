@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import os
 import secrets
-from functools import lru_cache
+import threading
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-from sysmind.core.constants import LOOPBACK_HOST
 
 
 def default_data_dir() -> Path:
@@ -26,7 +24,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Literal already rejects any non-loopback host at validation time.
     host: Literal["127.0.0.1"] = "127.0.0.1"
+    # 0 (default) lets the OS assign an ephemeral port; the bound port is published
+    # at startup via the sysmind_endpoint runtime event.
     port: int = Field(default=0, ge=0, le=65535)
     session_token: SecretStr = Field(
         default_factory=lambda: SecretStr(secrets.token_urlsafe(32)),
@@ -39,13 +40,6 @@ class Settings(BaseSettings):
         "http://localhost:1420,http://127.0.0.1:1420"
     )
 
-    @field_validator("host")
-    @classmethod
-    def reject_non_loopback(cls, value: Literal["127.0.0.1"]) -> Literal["127.0.0.1"]:
-        if value != LOOPBACK_HOST:
-            raise ValueError("SysMind backend must listen on 127.0.0.1")
-        return value
-
     @field_validator("log_level")
     @classmethod
     def normalize_log_level(cls, value: str) -> str:
@@ -56,6 +50,8 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        # SQLAlchemy treats the text after sqlite:/// as a filesystem path, so spaces
+        # are valid and must not be percent-encoded (that would change the file name).
         database_path = (self.data_dir / "sysmind.db").resolve()
         return f"sqlite:///{database_path.as_posix()}"
 
@@ -64,6 +60,29 @@ class Settings(BaseSettings):
         return tuple(origin.strip() for origin in self.allowed_origins.split(",") if origin.strip())
 
 
-@lru_cache
+_settings: Settings | None = None
+_settings_lock = threading.Lock()
+
+
+def configure_settings(settings: Settings) -> Settings:
+    """Install the process-wide settings instance.
+
+    The startup path builds ``Settings`` explicitly (e.g. from CLI arguments) and must
+    become the single source of truth so that ``session_token`` — whose default is
+    randomly generated per instance — is never produced twice within one process.
+    """
+    global _settings
+    with _settings_lock:
+        _settings = settings
+    return settings
+
+
 def get_settings() -> Settings:
-    return Settings()
+    global _settings
+    # Double-checked locking: concurrent callers must share one Settings instance,
+    # otherwise each default_factory would mint a different session_token.
+    if _settings is None:
+        with _settings_lock:
+            if _settings is None:
+                _settings = Settings()
+    return _settings
