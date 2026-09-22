@@ -48,6 +48,21 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _planner_stop_reason(code: str) -> StopReason:
+    """Map planner failures without overstating safety risk.
+
+    ``risk_limit_reached`` covers policy/tool allowlist refusals (including
+    ``invalid_plan`` when the plan names a non-read-only tool). Provider and
+    transport failures are ``internal_error``; only explicit budget codes map
+    to ``budget_exceeded``.
+    """
+    if code == "plan_budget_exceeded":
+        return "budget_exceeded"
+    if code.startswith("provider_"):
+        return "internal_error"
+    return "risk_limit_reached"
+
+
 class DiagnosisCoordinator:
     def __init__(
         self,
@@ -183,9 +198,10 @@ class DiagnosisCoordinator:
                 message="诊断已取消。",
             )
         except DiagnosisPlannerError as error:
-            reason: StopReason = (
-                "budget_exceeded" if error.code == "plan_budget_exceeded" else "risk_limit_reached"
-            )
+            # Map planner failures accurately. Only an actual safety refusal is
+            # `risk_limit_reached`; budget and protocol/validation failures must
+            # not masquerade as a risk-limit stop.
+            reason: StopReason = _planner_stop_reason(error.code)
             self._stop_and_fail(
                 record.id,
                 reason=reason,
@@ -202,9 +218,10 @@ class DiagnosisCoordinator:
                 message=f"诊断超过 {self._active_timeout_seconds:g} 秒限制。",
             )
         except Exception:
+            # Unexpected bugs are not a safety risk-limit event.
             self._stop_and_fail(
                 record.id,
-                reason="risk_limit_reached",
+                reason="internal_error",
                 status="failed",
                 code="internal_error",
                 message="诊断失败，未暴露敏感错误细节。",
@@ -244,7 +261,34 @@ class DiagnosisCoordinator:
                 budget_stop = True
                 break
             if current_plan is None:
-                plan = await planner.create_plan(question)
+                try:
+                    plan = await planner.create_plan(question)
+                except DiagnosisPlannerError as error:
+                    # Provider/protocol failures should still allow a read-only
+                    # local plan so evidence collection can complete. Policy
+                    # refusals and budget errors still fail closed.
+                    if error.code in {"provider_error", "provider_protocol_error"}:
+                        log_event(
+                            _LOGGER,
+                            logging.WARNING,
+                            "Planner failed; falling back to local read-only plan.",
+                            component="diagnosis",
+                            event_type="diagnosis_planner_fallback",
+                            diagnosis_id=record.id,
+                            error_code=error.code,
+                        )
+                        self._repository.add_agent_decision(
+                            record.id,
+                            plan_id=None,
+                            decision_type="planner_fallback",
+                            reason="模型规划失败，改用本地只读诊断计划",
+                            data={"error_code": error.code},
+                            created_at=_now(),
+                        )
+                        plan = await FakeDiagnosisPlanner(self._registry).create_plan(question)
+                        planner = FakeDiagnosisPlanner(self._registry)
+                    else:
+                        raise
             else:
                 candidate = await planner.revise_plan(question, current_plan, calls)
                 if candidate is None:
@@ -520,8 +564,9 @@ class DiagnosisCoordinator:
             "insufficient_information": "当前证据不足，无法确定原因。",
             "budget_exceeded": "诊断达到安全预算，已使用现有证据生成报告。",
             "user_cancelled": "诊断已由用户取消。",
-            "risk_limit_reached": "诊断因安全限制停止。",
+            "risk_limit_reached": "诊断计划包含超出当前安全范围的操作，已停止。",
             "backend_restarted": "本地服务重启，诊断已中断。",
+            "internal_error": "诊断过程中出现内部错误，已安全停止。",
         }
         self._repository.record_stop_reason(
             record.id,

@@ -292,7 +292,15 @@ class ProviderDiagnosisPlanner:
             question=question,
             tools=tuple(item.descriptor() for item in self._registry.available()),
         )
-        response = await self._provider.complete(request)
+        try:
+            response = await self._provider.complete(request)
+        except DiagnosisPlannerError:
+            raise
+        except Exception as error:
+            raise DiagnosisPlannerError(
+                "provider_error",
+                "Planner provider request failed.",
+            ) from error
         return self._parse(response.action.content)
 
     async def revise_plan(
@@ -316,7 +324,15 @@ class ProviderDiagnosisPlanner:
                 for call in calls
             ),
         )
-        response = await self._provider.complete(request)
+        try:
+            response = await self._provider.complete(request)
+        except DiagnosisPlannerError:
+            raise
+        except Exception as error:
+            raise DiagnosisPlannerError(
+                "provider_error",
+                "Planner provider request failed.",
+            ) from error
         if response.action.type == "finalize" and response.action.content == "no_revision":
             return None
         # Only successfully completed tools block a retry; failed ones may be re-run.

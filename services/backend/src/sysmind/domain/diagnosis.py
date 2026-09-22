@@ -23,6 +23,7 @@ StopReason: TypeAlias = Literal[
     "budget_exceeded",
     "risk_limit_reached",
     "backend_restarted",
+    "internal_error",
 ]
 
 

@@ -84,6 +84,8 @@ export interface Diagnosis {
     | "insufficient_information"
     | "budget_exceeded"
     | "risk_limit_reached"
+    | "backend_restarted"
+    | "internal_error"
     | null;
   user_inputs: string[];
   progress: number;

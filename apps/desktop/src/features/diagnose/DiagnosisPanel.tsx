@@ -35,7 +35,9 @@ const STOP_REASON = {
   user_cancelled: "诊断已由你取消。",
   insufficient_information: "未形成可验证的原因结论。",
   budget_exceeded: "已达到安全检查上限，报告仅使用已完成的检查。",
-  risk_limit_reached: "诊断因安全限制停止，没有执行受限操作。",
+  risk_limit_reached: "诊断计划包含超出当前安全范围的操作，已停止。",
+  backend_restarted: "本地服务重启，诊断已中断。",
+  internal_error: "诊断过程中出现内部错误，已安全停止。",
 } as const;
 const EXAMPLES = ["电脑很慢", "无法上网", "某个软件总是闪退"];
 const TOOL_LABELS: Record<string, string> = {
