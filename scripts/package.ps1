@@ -13,7 +13,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-
+# Windows PowerShell 5.1 does not define $IsWindows; StrictMode would fail the check below.
+if (-not (Test-Path variable:IsWindows)) {
+    Set-Variable -Name IsWindows -Value $true -Scope Global -Force
+}
 if (-not $IsWindows -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
     throw 'Phase 6 packages must be built on Windows x64.'
 }
