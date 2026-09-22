@@ -384,7 +384,9 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
               {diagnosis.plan.map((step, index) => (
                 <li key={`${step.tool}-${index}`}>
                   <span>{index + 1}</span>
-                  <div><strong>{step.purpose}</strong></div>
+                  <div>
+                    <strong>{step.reason || step.purpose}</strong>
+                  </div>
                 </li>
               ))}
             </ol>

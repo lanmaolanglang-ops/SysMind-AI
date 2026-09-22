@@ -25,6 +25,8 @@ jobs:
       - run: pytest --cov=sysmind --cov-report=term-missing --cov-fail-under=70 services/backend
       - run: python scripts/export-openapi.py
       - run: git diff --exit-code -- contracts/openapi/sysmind-local-api.json
+      - run: python scripts/generate-ts-types.py --check
+      - run: python scripts/sync-versions.py --check
 
   frontend:
     runs-on: ubuntu-latest

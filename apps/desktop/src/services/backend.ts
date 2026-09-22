@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { ApiClient, ApiClientError } from "./api-client";
+import { EXPECTED_API_VERSION } from "./generated-version";
 
-const EXPECTED_API_VERSION = "1.0";
+export type { components } from "./openapi-types";
+export { EXPECTED_API_VERSION, PRODUCT_VERSION } from "./generated-version";
 
 export interface BackendEndpoint {
   base_url: string;

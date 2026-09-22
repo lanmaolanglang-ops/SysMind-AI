@@ -55,13 +55,25 @@ export interface Diagnosis {
   user_question: string;
   category: "performance" | "network" | "crash";
   provider: string;
-  plan: Array<{ tool: string; purpose: string; arguments: Record<string, unknown> }>;
+  // `reason` is canonical; `purpose` is a compatibility alias kept during the
+  // versioned plan-contract migration and will be removed in a later API version.
+  plan: Array<{
+    tool: string;
+    reason?: string;
+    purpose?: string;
+    arguments: Record<string, unknown>;
+  }>;
   diagnosis_plan?: {
     problem_category: "performance" | "network" | "crash";
     confidence: number;
     status: "ready" | "ask_user" | "complete";
     clarification_question: string | null;
-    steps: Array<{ tool: string; purpose: string; reason: string; arguments: Record<string, unknown> }>;
+    steps: Array<{
+      tool: string;
+      reason: string;
+      purpose?: string;
+      arguments: Record<string, unknown>;
+    }>;
   } | null;
   agent_round_count: number;
   max_agent_rounds: number;

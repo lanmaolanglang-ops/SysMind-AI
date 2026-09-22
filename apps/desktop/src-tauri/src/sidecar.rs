@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-const EXPECTED_API_VERSION: &str = "1.0";
+const EXPECTED_API_VERSION: &str = crate::generated_version::EXPECTED_API_VERSION;
 const HANDSHAKE_PREFIX: &str = "SYSMIND_ENDPOINT ";
 /// The backend publishes its endpoint before the HTTP server starts serving. If it is
 /// alive but silent for longer than this, startup is treated as failed instead of

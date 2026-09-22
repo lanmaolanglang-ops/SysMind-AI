@@ -16,7 +16,14 @@ function report(id = "diagnosis-1"): Diagnosis {
     user_question: "电脑很卡",
     category: "performance",
     provider: "local-rules",
-    plan: [{ tool: "system.cpu@1.0", purpose: "采集 CPU 状态", arguments: {} }],
+    plan: [
+      {
+        tool: "system.cpu@1.0",
+        reason: "采集 CPU 状态",
+        purpose: "采集 CPU 状态",
+        arguments: {},
+      },
+    ],
     agent_round_count: 2,
     max_agent_rounds: 4,
     max_tool_calls: 8,

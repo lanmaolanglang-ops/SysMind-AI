@@ -1,3 +1,4 @@
+mod generated_version;
 mod sidecar;
 
 use sidecar::{BackendManager, BackendSnapshot};
