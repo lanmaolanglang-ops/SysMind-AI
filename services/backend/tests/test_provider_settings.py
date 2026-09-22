@@ -107,3 +107,61 @@ async def test_provider_test_connection_maps_unexpected_errors_to_failed_audit(
         ).one()
     engine.dispose()
     assert row == ("exploding", "failed", "internal_error")
+
+
+def test_provider_save_rolls_back_secret_when_repository_write_fails(tmp_path: Path) -> None:
+    database_url = f"sqlite:///{(tmp_path / 'settings-rollback.db').as_posix()}"
+    run_migrations(database_url)
+    secrets = FakeSecretService()
+    secrets.set("provider.api_key", "previous-secret")
+    repository = SqlAlchemyProviderSettingsRepository(create_session_factory(database_url))
+    service = ProviderSettingsService(
+        repository,
+        secrets,
+        OpenAICompatibleProviderFactory(),
+    )
+    service.save(
+        "openai_compatible",
+        "fixture-model",
+        "https://provider.example/v1",
+        "previous-secret",
+    )
+
+    def _explode(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated repository failure")
+
+    original = repository.save
+    repository.save = _explode  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError):
+            service.save(
+                "openai_compatible",
+                "fixture-model",
+                "https://provider.example/v1",
+                "new-secret",
+            )
+    finally:
+        repository.save = original  # type: ignore[method-assign]
+
+    assert secrets.get("provider.api_key") == "previous-secret"
+
+
+def test_provider_clear_credential_removes_secret(tmp_path: Path) -> None:
+    database_url = f"sqlite:///{(tmp_path / 'settings-clear.db').as_posix()}"
+    run_migrations(database_url)
+    secrets = FakeSecretService()
+    repository = SqlAlchemyProviderSettingsRepository(create_session_factory(database_url))
+    service = ProviderSettingsService(
+        repository,
+        secrets,
+        OpenAICompatibleProviderFactory(),
+    )
+    service.save(
+        "openai_compatible",
+        "fixture-model",
+        "https://provider.example/v1",
+        "to-be-cleared",
+    )
+    cleared = service.clear_credential()
+    assert cleared.configured is False
+    assert secrets.get("provider.api_key") is None
