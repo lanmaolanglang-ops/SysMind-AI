@@ -349,10 +349,10 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
             <progress value={diagnosis.progress} max="100" aria-label="诊断进度" />
           </div>
 
-          {diagnosis.status === "waiting_user_input" && diagnosis.current_step && (
+          {waitingForInput && (
             <div className="diagnosis-message diagnosis-follow-up">
               <strong>需要补充信息</strong>
-              <span>{diagnosis.current_step}</span>
+              {diagnosis.current_step && <span>{diagnosis.current_step}</span>}
               <label htmlFor="diagnosis-follow-up-answer">补充说明</label>
               <textarea
                 id="diagnosis-follow-up-answer"

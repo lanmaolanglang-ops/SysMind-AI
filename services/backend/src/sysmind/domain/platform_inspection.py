@@ -61,6 +61,7 @@ class StartupItem:
     command_name: str | None
     publisher: str | None = None
     signature_status: str = "unavailable"
+    item_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

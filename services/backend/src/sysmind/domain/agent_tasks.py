@@ -37,6 +37,18 @@ class AgentBudget:
     timeout_seconds: float = 30.0
     max_parallel_tools: int = 2
 
+    def __post_init__(self) -> None:
+        # Mirrors AgentTaskManager.start so an invalid budget fails at construction,
+        # not halfway through wiring a task.
+        if self.max_rounds < 1:
+            raise ValueError("max_rounds must be at least 1.")
+        if self.max_tool_calls < 1:
+            raise ValueError("max_tool_calls must be at least 1.")
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive.")
+        if self.max_parallel_tools < 1:
+            raise ValueError("max_parallel_tools must be at least 1.")
+
 
 @dataclass(frozen=True, slots=True)
 class AgentTaskRecord:
@@ -59,6 +71,9 @@ class AgentTaskRecord:
     finished_at: str | None
     schema_version: str
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "working_summary", dict(self.working_summary))
+
 
 @dataclass(frozen=True, slots=True)
 class AgentTaskEvent:
@@ -67,6 +82,9 @@ class AgentTaskEvent:
     event_type: AgentEventType
     data: dict[str, object]
     created_at: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "data", dict(self.data))
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,3 +103,7 @@ class AgentToolCallRecord:
     result_summary: dict[str, object] | None
     error_code: str | None
     error_message: str | None
+
+    def __post_init__(self) -> None:
+        if self.result_summary is not None:
+            object.__setattr__(self, "result_summary", dict(self.result_summary))

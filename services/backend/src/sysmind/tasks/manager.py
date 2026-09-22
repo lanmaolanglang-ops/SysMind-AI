@@ -78,6 +78,12 @@ class AgentTaskManager:
             definition = self._registry.require(qualified_name)
             if definition.risk_level != "read_only":
                 raise ToolRegistryError("Only read-only tools may enter a Phase 3 task.")
+        if budget.max_rounds < 1 or budget.max_tool_calls < 1:
+            raise ValueError("Agent budget must allow at least one round and one tool call.")
+        if budget.timeout_seconds <= 0:
+            raise ValueError("Agent budget timeout must be positive.")
+        if budget.max_parallel_tools < 1:
+            raise ValueError("Agent budget max_parallel_tools must be at least 1.")
         provider = self._provider_factory()
         task_id = str(uuid.uuid4())
         record = self._repository.create(

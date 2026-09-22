@@ -24,6 +24,12 @@ class ToolSpec:
     timeout_seconds: float
     read_only: bool = True
 
+    def __post_init__(self) -> None:
+        # Keep the same bounds as ToolRegistry.register so toolset declarations
+        # cannot drift above the runtime ceiling.
+        if not 0 < self.timeout_seconds <= 60:
+            raise ValueError("Tool timeout must be between 0 and 60 seconds.")
+
 
 class ToolUnavailableError(RuntimeError):
     pass

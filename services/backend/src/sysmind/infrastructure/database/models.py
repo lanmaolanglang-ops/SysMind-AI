@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from sysmind.infrastructure.database.base import Base
@@ -299,6 +299,10 @@ class DiagnosisModelCall(Base):
 
 class AgentPlanModel(Base):
     __tablename__ = "agent_plans"
+    # One plan revision per diagnosis; matches uq_agent_plan_revision.
+    __table_args__ = (
+        UniqueConstraint("diagnosis_id", "revision", name="uq_agent_plan_revision"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     diagnosis_id: Mapped[str] = mapped_column(
         ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
@@ -316,7 +320,7 @@ class DiagnosisStepModel(Base):
     __tablename__ = "diagnosis_steps"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     plan_id: Mapped[str] = mapped_column(
-        ForeignKey("agent_plans.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("agent_plans.id", ondelete="CASCADE"), nullable=False, index=True
     )
     diagnosis_id: Mapped[str] = mapped_column(
         ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
@@ -330,7 +334,7 @@ class DiagnosisStepModel(Base):
     # SET NULL (not CASCADE): deleting a diagnosis removes its tool calls, and a step that
     # still pointed at one must survive that cascade without failing the foreign key.
     tool_call_id: Mapped[str | None] = mapped_column(
-        ForeignKey("diagnosis_tool_calls.id", ondelete="SET NULL")
+        ForeignKey("diagnosis_tool_calls.id", ondelete="SET NULL"), index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -341,7 +345,9 @@ class AgentDecisionModel(Base):
     diagnosis_id: Mapped[str] = mapped_column(
         ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    plan_id: Mapped[str | None] = mapped_column(ForeignKey("agent_plans.id", ondelete="SET NULL"))
+    plan_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_plans.id", ondelete="SET NULL"), index=True
+    )
     decision_type: Mapped[str] = mapped_column(String(40), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     data_json: Mapped[str] = mapped_column(Text, nullable=False)
@@ -350,6 +356,10 @@ class AgentDecisionModel(Base):
 
 class TaskUserInputModel(Base):
     __tablename__ = "task_user_inputs"
+    # One answer per sequence slot; matches uq_task_user_input_sequence.
+    __table_args__ = (
+        UniqueConstraint("diagnosis_id", "sequence", name="uq_task_user_input_sequence"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     diagnosis_id: Mapped[str] = mapped_column(
         ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
@@ -361,6 +371,10 @@ class TaskUserInputModel(Base):
 
 class DiagnosisHypothesisModel(Base):
     __tablename__ = "diagnosis_hypotheses"
+    # One live row per hypothesis key; matches uq_diagnosis_hypothesis.
+    __table_args__ = (
+        UniqueConstraint("diagnosis_id", "hypothesis_key", name="uq_diagnosis_hypothesis"),
+    )
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     diagnosis_id: Mapped[str] = mapped_column(
         ForeignKey("diagnoses.id", ondelete="CASCADE"), nullable=False, index=True
@@ -391,6 +405,8 @@ class AgentStopReasonModel(Base):
 class ActionPlanModel(Base):
     __tablename__ = "action_plans"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # No ondelete (RESTRICT): controlled-action audit must outlive the diagnosis and
+    # block deleting a diagnosis that still has action-plan history.
     diagnosis_id: Mapped[str] = mapped_column(
         ForeignKey("diagnoses.id"), nullable=False, index=True
     )
@@ -401,6 +417,8 @@ class ActionPlanModel(Base):
 class ActionModel(Base):
     __tablename__ = "actions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # No ondelete (RESTRICT) on these audit FKs: deleting a plan or diagnosis that still
+    # has controlled-action history must fail rather than erase the audit trail.
     plan_id: Mapped[str] = mapped_column(ForeignKey("action_plans.id"), nullable=False, index=True)
     diagnosis_id: Mapped[str] = mapped_column(
         ForeignKey("diagnoses.id"), nullable=False, index=True
@@ -422,6 +440,7 @@ class ActionModel(Base):
 class UserConfirmationModel(Base):
     __tablename__ = "user_confirmations"
     id: Mapped[int] = mapped_column(Integer(), primary_key=True, autoincrement=True)
+    # No ondelete (RESTRICT): confirmation tickets are part of the action audit trail.
     action_id: Mapped[str] = mapped_column(ForeignKey("actions.id"), nullable=False, index=True)
     ticket_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     decision: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -433,6 +452,7 @@ class UserConfirmationModel(Base):
 class ActionEventModel(Base):
     __tablename__ = "action_events"
     id: Mapped[int] = mapped_column(Integer(), primary_key=True, autoincrement=True)
+    # No ondelete (RESTRICT): action events must not be cascade-deleted with the action.
     action_id: Mapped[str] = mapped_column(ForeignKey("actions.id"), nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(40), nullable=False)
     data_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
@@ -442,6 +462,7 @@ class ActionEventModel(Base):
 class RecoveryRecordModel(Base):
     __tablename__ = "recovery_records"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # No ondelete (RESTRICT): recovery records are part of the controlled-action audit.
     action_id: Mapped[str] = mapped_column(ForeignKey("actions.id"), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

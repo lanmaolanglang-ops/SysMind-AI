@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from typing import cast
+
+from sysmind.security.redaction import redact_structure
 
 
 def call_signature(name: str, version: str, arguments: dict[str, object]) -> str:
@@ -30,10 +33,11 @@ class WorkingMemory:
     ) -> None:
         self.signatures.add(call_signature(name, version, arguments))
         self.tool_call_count += 1
+        safe_summary = redact_structure(summary or {})
         observation: dict[str, object] = {
             "tool": f"{name}@{version}",
             "status": status,
-            "summary": summary or {},
+            "summary": cast(dict[str, object], safe_summary),
         }
         if error_code:
             observation["error_code"] = error_code

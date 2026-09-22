@@ -101,7 +101,11 @@ def validate_plan(
             "plan_budget_exceeded", "The diagnosis plan exceeds its budget."
         )
 
-    seen = set(already_called)
+    # ``already_called`` lists tools that already completed successfully. Re-proposing
+    # one is not a plan error: keep the step so the coordinator can mark it
+    # ``skipped_duplicate``. Failed tools are absent from ``already_called`` and may be
+    # retried. Only a repeat within this same plan is a hard duplicate.
+    seen_in_plan: set[str] = set()
     validated_steps: list[DiagnosisPlanStep] = []
     for step in payload.steps:
         try:
@@ -130,11 +134,11 @@ def validate_plan(
             raise DiagnosisPlannerError(
                 "invalid_arguments", "A plan step has arguments outside its registered schema."
             ) from error
-        if step.tool in seen:
+        if step.tool in seen_in_plan:
             raise DiagnosisPlannerError(
                 "duplicate_tool", "The plan repeated an existing tool call."
             )
-        seen.add(step.tool)
+        seen_in_plan.add(step.tool)
         validated_steps.append(DiagnosisPlanStep(step.tool, step.reason, normalized))
     return DiagnosisPlan(
         payload.problem_category,
@@ -250,7 +254,12 @@ class FakeDiagnosisPlanner:
             )
         if not next_steps:
             return None
-        signatures = tuple(f"{call.tool_name}@{call.tool_version}" for call in calls)
+        # Only successfully completed tools block a retry; failed ones may be re-run.
+        signatures = tuple(
+            f"{call.tool_name}@{call.tool_version}"
+            for call in calls
+            if call.status == "completed"
+        )
         return validate_plan(
             PlanPayload(
                 problem_category="performance",
@@ -310,7 +319,12 @@ class ProviderDiagnosisPlanner:
         response = await self._provider.complete(request)
         if response.action.type == "finalize" and response.action.content == "no_revision":
             return None
-        called = tuple(f"{call.tool_name}@{call.tool_version}" for call in calls)
+        # Only successfully completed tools block a retry; failed ones may be re-run.
+        called = tuple(
+            f"{call.tool_name}@{call.tool_version}"
+            for call in calls
+            if call.status == "completed"
+        )
         return self._parse(
             response.action.content,
             already_called=called,

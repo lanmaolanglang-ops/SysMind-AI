@@ -22,7 +22,13 @@ class LogAnalysisRepository(Protocol):
         finished_at: str | None = None,
         summary: dict[str, object] | None = None,
         failures: Sequence[dict[str, str]] | None = None,
-    ) -> LogAnalysisRecord: ...
+    ) -> LogAnalysisRecord:
+        """Update a log analysis.
+
+        ``failures=None`` means "leave the stored failures unchanged"; pass a
+        sequence (possibly empty) to replace them.
+        """
+        ...
 
     def add_step_event(
         self,
@@ -44,4 +50,10 @@ class LogAnalysisRepository(Protocol):
 
     def recent(self, limit: int = 20) -> list[LogAnalysisRecord]: ...
 
-    def mark_interrupted(self, finished_at: str) -> int: ...
+    def mark_interrupted(self, finished_at: str) -> int:
+        """Mark in-flight analyses after a backend restart.
+
+        Contract: terminal ``status="failed"`` and append a failure with
+        ``code="backend_restarted"``. Returns the number of records updated.
+        """
+        ...

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import ipaddress
 import os
+import re
 import socket
 import time
 from ctypes import wintypes
@@ -23,10 +24,21 @@ from sysmind.domain.platform_inspection import (
     StartupItem,
 )
 from sysmind.tools.contracts import ToolCancelledError, ToolUnavailableError
+from sysmind.windows.identity import startup_item_id
 
 _DNS_DOMAINS = {"one.one.one.one", "www.microsoft.com"}
 _PING_TARGETS = {"1.1.1.1", "8.8.8.8"}
 _IP_SUCCESS = 0
+_MAX_PING_TIMEOUT_MS = 30_000
+_MAX_PING_COUNT = 10
+# ProxyServer can embed basic credentials ("http://user:pass@host:8080").
+_PROXY_CREDENTIALS = re.compile(r"(?i)([^:/@\s]+):([^@/\s]+)@")
+
+
+def _redact_proxy(value: str | None) -> str | None:
+    if not value:
+        return value
+    return _PROXY_CREDENTIALS.sub("[REDACTED]@", value)
 
 
 class _WinHttpProxyInfo(ctypes.Structure):
@@ -76,9 +88,37 @@ def _executable_token(text: str) -> str:
         if index == -1:
             continue
         end = index + len(suffix)
-        if end == len(text) or text[end] in " \t'\"":
-            return text[:end]
-    return text.split()[0]
+        if end < len(text) and text[end] not in " \t'\"":
+            continue
+        if suffix == ".com" and not _com_ends_path_token(text, index):
+            continue
+        return text[:end]
+    parts = text.split()
+    return parts[0] if parts else text
+
+
+def _com_ends_path_token(text: str, index: int) -> bool:
+    """True when '.com' ends a filesystem token, not a hostname TLD.
+
+    ``_executable_token`` must recover ``C:\\tools\\command.com`` but must not
+    treat the ``.com`` in ``ping example.com`` or ``https://host.com/x`` as an
+    executable boundary.
+    """
+    if index == 0:
+        return True
+    prefix = text[:index]
+    if "://" in prefix or prefix.endswith("//"):
+        return False
+    token_start = 0
+    for position in range(len(prefix) - 1, -1, -1):
+        if prefix[position] in " \t'\"":
+            token_start = position + 1
+            break
+    token = text[token_start : index + 4]
+    if "\\" in token or "/" in token:
+        return True
+    # Bare "app.com" as the first whitespace token; "www.example.com" is a host.
+    return token_start == 0 and token.count(".") == 1
 
 
 def _basename(command: str) -> str | None:
@@ -102,14 +142,18 @@ def _registry_dns_servers() -> tuple[str, ...]:
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as root:
             for index in range(winreg.QueryInfoKey(root)[0]):
-                with winreg.OpenKey(root, winreg.EnumKey(root, index)) as interface:
-                    for name in ("NameServer", "DhcpNameServer"):
-                        try:
-                            raw, _ = winreg.QueryValueEx(interface, name)
-                        except OSError:
-                            continue
-                        if isinstance(raw, str):
-                            found.update(raw.replace(",", " ").split())
+                try:
+                    with winreg.OpenKey(root, winreg.EnumKey(root, index)) as interface:
+                        for name in ("NameServer", "DhcpNameServer"):
+                            try:
+                                raw, _ = winreg.QueryValueEx(interface, name)
+                            except OSError:
+                                continue
+                            if isinstance(raw, str):
+                                found.update(raw.replace(",", " ").split())
+                except OSError:
+                    # One unreadable interface must not discard the others.
+                    continue
     except OSError:
         return ()
     return tuple(sorted(found))[:8]
@@ -177,10 +221,10 @@ class WindowsNetworkProbe:
             raise ToolUnavailableError("Windows proxy configuration is unavailable.") from error
         return ProxyConfiguration(
             enabled,
-            server,
+            _redact_proxy(server),
             len([x for x in bypass.split(";") if x]),
             auto,
-            _winhttp_proxy(),
+            _redact_proxy(_winhttp_proxy()),
         )
 
     def dns_check(self, domain: str, cancel_event: Event) -> DnsCheckResult:
@@ -210,6 +254,10 @@ class WindowsNetworkProbe:
     ) -> PingResult:
         if os.name != "nt":
             raise ToolUnavailableError("Windows ICMP is unavailable.")
+        if count <= 0:
+            return PingResult(target, 0, 0, 0.0, None)
+        count = min(count, _MAX_PING_COUNT)
+        timeout_ms = min(max(int(timeout_ms), 1), _MAX_PING_TIMEOUT_MS)
         iphlpapi = ctypes.WinDLL("iphlpapi.dll")
         ws2_32 = ctypes.WinDLL("ws2_32.dll")
         iphlpapi.IcmpCreateFile.restype = wintypes.HANDLE
@@ -229,7 +277,10 @@ class WindowsNetworkProbe:
         ws2_32.inet_addr.argtypes = (wintypes.LPCSTR,)
         ws2_32.inet_addr.restype = wintypes.ULONG
         handle = iphlpapi.IcmpCreateFile()
-        if handle in (0, -1):
+        # INVALID_HANDLE_VALUE is (HANDLE)-1, which is pointer-sized: on 64-bit
+        # Python ctypes may surface 0xFFFFFFFFFFFFFFFF rather than -1.
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle is None or int(handle) in (0, -1, 0xFFFFFFFF, invalid_handle):
             raise ToolUnavailableError("Windows could not open an ICMP handle.")
         payload = b"sysmind"
         durations: list[int] = []
@@ -331,7 +382,15 @@ class WindowsStartupProbe:
                 with winreg.OpenKey(hive, path) as key:
                     for index in range(min(winreg.QueryInfoKey(key)[1], 100)):
                         name, value, _ = winreg.EnumValue(key, index)
-                        items.append(StartupItem(name, source, source, _basename(str(value))))
+                        items.append(
+                            StartupItem(
+                                name,
+                                source,
+                                source,
+                                _basename(str(value)),
+                                item_id=startup_item_id(source, name),
+                            )
+                        )
             except (OSError, PermissionError):
                 continue
         for root, source in (
@@ -353,7 +412,15 @@ class WindowsStartupProbe:
                         or attributes & 0x400
                     ):
                         continue
-                    items.append(StartupItem(entry.stem, source, source, entry.name))
+                    items.append(
+                        StartupItem(
+                            entry.stem,
+                            source,
+                            source,
+                            entry.name,
+                            item_id=startup_item_id(source, entry.stem),
+                        )
+                    )
             except OSError:
                 continue
         task_cache = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree"
@@ -371,9 +438,17 @@ class WindowsStartupProbe:
                     path = f"{prefix}\\{name}" if prefix else name
                     with winreg.OpenKey(key, name) as child:
                         try:
+                            # Only real task leaves carry an Id; folder nodes in the
+                            # Tree hierarchy must not be reported as startup items.
                             winreg.QueryValueEx(child, "Id")
                             items.append(
-                                StartupItem(name, "scheduled_task", "task_scheduler", None)
+                                StartupItem(
+                                    path,
+                                    "scheduled_task",
+                                    "task_scheduler",
+                                    None,
+                                    item_id=startup_item_id("scheduled_task", path),
+                                )
                             )
                         except OSError:
                             pass
@@ -393,14 +468,22 @@ class WindowsStartupProbe:
         return StartupAssessment(
             items,
             len(items),
-            sum(1 for item in items if item.command_name is None),
+            # Inventory alone does not measure boot impact. Counting every entry
+            # without a resolved command line (all scheduled tasks) as "high impact"
+            # overstated the risk surface.
+            0,
             (
-                "Startup inventory is large."
-                if len(items) >= 20
-                else "Startup inventory is bounded.",
+                (
+                    "Startup inventory is large."
+                    if len(items) >= 20
+                    else "Startup inventory is bounded."
+                ),
+                "High-impact startup entries require workload context and are not inferred here.",
                 "Unknown publisher or path is not treated as malicious.",
             ),
-            sum(1 for item in items if item.signature_status == "unavailable"),
+            # Signature status is not probed in this read-only inventory; reporting
+            # every default "unavailable" entry as an unknown signature did the same.
+            0,
         )
 
 
@@ -431,11 +514,14 @@ class WindowsServiceProbe:
 
     def analyze(self) -> ServiceAssessment:
         services = self.list_services()
+        # Paused services are still started, and trigger-start services are not
+        # plain boot-automatic; neither is a "stopped automatic" finding.
         stopped = sum(
             1
             for item in services
             if item.start_type in {"automatic", "automatic (delayed start)"}
-            and item.status != "running"
+            and "trigger" not in item.start_type.casefold()
+            and item.status == "stopped"
         )
         return ServiceAssessment(
             services,

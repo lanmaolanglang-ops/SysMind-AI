@@ -24,10 +24,23 @@ from sysmind.prompts.report_explainer import provider_request_hash
 from sysmind.tools.executor import ToolExecutor
 from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolDefinition, ToolRegistry
+from sysmind.tools.runtime_tools import (
+    EventLogToolInput,
+    HighUsageInput,
+    ProcessSnapshotInput,
+)
+
+_FIXTURE_INPUT_MODELS: dict[str, type[BaseModel]] = {
+    "process.snapshot": ProcessSnapshotInput,
+    "process.high_usage": HighUsageInput,
+    "log.crash.analyze": EventLogToolInput,
+}
 
 
 class AnyInput(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # Match production EmptyInput: reject unknown keys (tools that take arguments
+    # register the real runtime_tools input models below).
+    model_config = ConfigDict(extra="forbid")
 
 
 RESULTS: dict[str, object] = {
@@ -93,7 +106,7 @@ def _registry(
                 name=name,
                 version=version,
                 description="Deterministic Phase 4 golden fixture.",
-                input_model=AnyInput,
+                input_model=_FIXTURE_INPUT_MODELS.get(name, AnyInput),
                 output_adapter=TypeAdapter(dict[str, object] | list[object]),
                 risk_level="network"
                 if name.startswith("network.") and name != "network.proxy.get_config"

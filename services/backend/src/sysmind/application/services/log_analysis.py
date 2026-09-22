@@ -9,13 +9,14 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
-from functools import partial
 from threading import Event
 from typing import cast, get_args
 
 from sysmind.application.ports.log_analyses import LogAnalysisRepository
 from sysmind.domain.diagnostics import StepStatus
 from sysmind.domain.event_logs import (
+    MAX_EVENTS,
+    MAX_LOOKBACK_HOURS,
     AnalysisStatus,
     EventLevel,
     EventLogQuery,
@@ -30,6 +31,7 @@ from sysmind.tools.contracts import (
     ToolSpec,
     ToolUnavailableError,
 )
+from sysmind.tools.executor import AnyCancelEvent
 from sysmind.tools.log import LOG_TOOL_SPECS, LogTools
 
 LOG_ANALYSIS_SCHEMA_VERSION = "1.0"
@@ -43,37 +45,10 @@ def _now() -> str:
 # Kept in step with QuickScanCoordinator: a crash used to strand a running
 # analysis until the user started a new one. Only recently started work is
 # replayed, and only a little of it, so a backlog cannot flood the machine.
-REPLAY_WINDOW_SECONDS = 900
-MAX_REPLAYS_PER_STARTUP = 2
-
-# A replay reads the request back out of storage, so it must be re-validated
-# against the same allowlists the API enforces rather than trusted as-is.
+# Allowlist constants used when validating a stored query (kept for any future
+# opt-in resume path and for defense-in-depth tests).
 _ALLOWED_CHANNEL_NAMES = frozenset(get_args(LogChannel))
 _ALLOWED_LEVEL_NAMES = frozenset(get_args(EventLevel))
-
-
-def _started_within_replay_window(record: LogAnalysisRecord) -> bool:
-    try:
-        started = datetime.fromisoformat(record.started_at)
-    except ValueError:
-        return False
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - started).total_seconds() <= REPLAY_WINDOW_SECONDS
-
-
-def _interrupted_by_restart(record: LogAnalysisRecord) -> bool:
-    return record.status == "failed" and any(
-        failure.get("code") == "backend_restarted" for failure in record.failures
-    )
-
-
-def _discard_task(
-    tasks: dict[str, asyncio.Task[None]],
-    analysis_id: str,
-    _task: asyncio.Task[None],
-) -> None:
-    tasks.pop(analysis_id, None)
 
 
 def _replay_parameters(
@@ -91,9 +66,9 @@ def _replay_parameters(
         return None
     if not isinstance(event_ids, list):
         return None
-    if not isinstance(lookback_hours, int) or not 1 <= lookback_hours <= 168:
+    if not isinstance(lookback_hours, int) or not 1 <= lookback_hours <= MAX_LOOKBACK_HOURS:
         return None
-    if not isinstance(max_events, int) or not 1 <= max_events <= 200:
+    if not isinstance(max_events, int) or not 1 <= max_events <= MAX_EVENTS:
         return None
     if not all(item in _ALLOWED_CHANNEL_NAMES for item in channels):
         return None
@@ -185,58 +160,12 @@ class LogAnalysisCoordinator:
         return self._repository.recent(limit)
 
     def recover_interrupted(self) -> int:
-        interrupted = self._repository.mark_interrupted(_now())
-        if interrupted:
-            self._replay_recently_interrupted()
-        return interrupted
+        """Mark orphaned analyses as failed; do not auto-replay.
 
-    def _replay_recently_interrupted(self) -> int:
-        """Re-run analyses a crash cut short instead of leaving them for the user."""
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return 0
-        replayed = 0
-        for record in self._repository.recent(MAX_REPLAYS_PER_STARTUP * 5):
-            if replayed >= MAX_REPLAYS_PER_STARTUP:
-                break
-            if not _interrupted_by_restart(record):
-                continue
-            if not _started_within_replay_window(record):
-                continue
-            parameters = _replay_parameters(record.query)
-            if parameters is None:
-                continue
-            channels, lookback_hours, levels, event_ids, max_events = parameters
-            cancellation = Event()
-            self._cancellations[record.id] = cancellation
-            task = asyncio.create_task(
-                self._run_guarded(
-                    record.id,
-                    channels,
-                    lookback_hours,
-                    levels,
-                    event_ids,
-                    max_events,
-                    cancellation,
-                    None,
-                ),
-                name=f"log-analysis-replay-{record.id}",
-            )
-            self._tasks[record.id] = task
-            # partial() binds the id now; a lambda here would capture the last
-            # record in the loop and pop the wrong entry.
-            task.add_done_callback(partial(_discard_task, self._tasks, record.id))
-            replayed += 1
-            log_event(
-                _LOGGER,
-                logging.INFO,
-                "Log analysis replayed after an interrupted run.",
-                component="log_analysis",
-                event_type="analysis_replayed",
-                analysis_id=record.id,
-            )
-        return replayed
+        PRD/ADR require that an interrupted run terminates rather than silently
+        restarting collection. Users can start a new analysis from the UI.
+        """
+        return self._repository.mark_interrupted(_now())
 
     def cancel(self, analysis_id: str) -> LogAnalysisRecord | None:
         record = self._repository.get(analysis_id)
@@ -265,9 +194,10 @@ class LogAnalysisCoordinator:
         max_events: int,
         cancellation: Event,
         correlation_id: str | None,
+        collected_events: list[WindowsEvent],
     ) -> None:
         failures: list[dict[str, str]] = []
-        events: list[WindowsEvent] = []
+        events = collected_events
         specs_by_name = {spec.name: spec for spec in LOG_TOOL_SPECS}
         query_spec = specs_by_name["log.windows_event.query"]
         analyze_spec = specs_by_name["log.crash.analyze"]
@@ -396,14 +326,21 @@ class LogAnalysisCoordinator:
         error_message: str | None = None
         result: tuple[WindowsEvent, ...] = ()
         arguments = asdict(query)
+        timed_out = Event()
         try:
             value = await asyncio.wait_for(
-                asyncio.to_thread(self._tools.query, query, cancellation),
+                asyncio.to_thread(
+                    self._tools.query, query, AnyCancelEvent(cancellation, timed_out)
+                ),
                 timeout=spec.timeout_seconds,
             )
             result = tuple(value)
             return result
         except Exception as error:
+            if isinstance(error, TimeoutError):
+                # wait_for abandons the awaitable but the worker thread keeps running;
+                # signal just this query so it can stop without cancelling siblings.
+                timed_out.set()
             error_code, error_message, status = _failure(error)
             raise
         finally:
@@ -432,6 +369,8 @@ class LogAnalysisCoordinator:
         cancellation: Event,
         correlation_id: str | None,
     ) -> None:
+        # Shared with _run so a CancelledError can still persist what was collected.
+        collected_events: list[WindowsEvent] = []
         try:
             async with asyncio.timeout(30):
                 await self._run(
@@ -443,12 +382,13 @@ class LogAnalysisCoordinator:
                     max_events,
                     cancellation,
                     correlation_id,
+                    collected_events,
                 )
         except asyncio.CancelledError:
             record = self._repository.get(analysis_id)
             if record and record.status in {"queued", "running"}:
                 self._finish_cancelled(
-                    analysis_id, [], record.failures, max_events=max_events
+                    analysis_id, collected_events, record.failures, max_events=max_events
                 )
         except TimeoutError:
             cancellation.set()

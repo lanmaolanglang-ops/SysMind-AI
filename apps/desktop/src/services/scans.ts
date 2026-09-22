@@ -37,7 +37,16 @@ export interface ScanSummary {
     utilization_percent: number;
     frequency_mhz: number | null;
   } | null;
-  gpus: Array<{ name: string; memory_bytes: number | null; driver_version: string | null }>;
+  gpus: Array<{
+    name: string;
+    memory_bytes: number | null;
+    driver_version: string | null;
+    telemetry_available?: boolean;
+    utilization_percent?: number | null;
+    memory_used_bytes?: number | null;
+    telemetry_limitation?: string | null;
+    telemetry_scope?: string;
+  }>;
   memory: {
     total_bytes: number;
     available_bytes: number;

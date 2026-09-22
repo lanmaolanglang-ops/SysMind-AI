@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
 
 from sysmind.agent.contracts import AgentProvider, ProviderError, ProviderRequest
 from sysmind.application.ports.agent_providers import AgentProviderFactory
@@ -13,6 +15,18 @@ from sysmind.observability.logging import log_event
 
 _SECRET_REFERENCE = "provider.api_key"
 _LOGGER = logging.getLogger(__name__)
+# Connection tests hit a remote endpoint; bound them so a hung provider cannot
+# occupy the request forever.
+_TEST_TIMEOUT_SECONDS = 15.0
+
+
+def _strip_url_userinfo(endpoint: str) -> str:
+    """Drop any ``user:password@`` userinfo so credentials never appear in public settings."""
+    parts = urlsplit(endpoint)
+    if "@" not in parts.netloc:
+        return endpoint
+    host = parts.netloc.rsplit("@", 1)[1]
+    return urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +48,9 @@ class ProviderSettingsService:
         self._repository = repository
         self._secrets = secrets
         self._provider_factory = provider_factory
+        # Serializes save/clear so a concurrent writer cannot observe a half-written
+        # secret/repository pair (e.g. key stored but row not yet saved).
+        self._mutation_lock = threading.Lock()
 
     def get(self) -> PublicProviderSettings:
         settings = self._repository.get()
@@ -45,7 +62,7 @@ class ProviderSettingsService:
         return PublicProviderSettings(
             settings.provider,
             settings.model,
-            settings.endpoint,
+            _strip_url_userinfo(settings.endpoint),
             configured,
             settings.updated_at,
         )
@@ -53,40 +70,50 @@ class ProviderSettingsService:
     def save(
         self, provider: str, model: str, endpoint: str, api_key: str | None
     ) -> PublicProviderSettings:
+        """Persist provider settings.
+
+        ``api_key=None`` (and the empty string, which is never a valid key) keeps the
+        previously stored secret. Use :meth:`clear_credential` for an explicit clear;
+        the API DTO already rejects blank keys with ``min_length=1``.
+        """
         if provider != "openai_compatible":
             raise ValueError("Unsupported provider.")
-        previous_secret = self._secrets.get(_SECRET_REFERENCE)
-        candidate_secret = api_key or previous_secret
-        if not candidate_secret:
-            raise ValueError("Provider API key is required.")
-        # Validate the same normalized values that will be persisted, so validation and
-        # storage can never disagree about what was saved.
-        normalized_model = model.strip()
-        normalized_endpoint = endpoint.rstrip("/")
-        self._provider_factory.validate(
-            endpoint=normalized_endpoint, model=normalized_model, api_key=candidate_secret
-        )
-        if api_key:
-            self._secrets.set(_SECRET_REFERENCE, api_key)
-        try:
-            self._repository.save(
-                provider, normalized_model, normalized_endpoint, _SECRET_REFERENCE
+        with self._mutation_lock:
+            previous_secret = self._secrets.get(_SECRET_REFERENCE)
+            candidate_secret = api_key or previous_secret
+            if not candidate_secret:
+                raise ValueError("Provider API key is required.")
+            # Validate the same normalized values that will be persisted, so validation and
+            # storage can never disagree about what was saved.
+            normalized_model = model.strip()
+            normalized_endpoint = endpoint.rstrip("/")
+            self._provider_factory.validate(
+                endpoint=normalized_endpoint, model=normalized_model, api_key=candidate_secret
             )
-        except Exception:
             if api_key:
-                if previous_secret is None:
-                    self._secrets.delete(_SECRET_REFERENCE)
-                else:
-                    self._secrets.set(_SECRET_REFERENCE, previous_secret)
-            raise
-        del candidate_secret
+                self._secrets.set(_SECRET_REFERENCE, api_key)
+            try:
+                self._repository.save(
+                    provider, normalized_model, normalized_endpoint, _SECRET_REFERENCE
+                )
+            except Exception:
+                if api_key:
+                    if previous_secret is None:
+                        self._secrets.delete(_SECRET_REFERENCE)
+                    else:
+                        self._secrets.set(_SECRET_REFERENCE, previous_secret)
+                raise
+            del candidate_secret
         return self.get()
 
     def clear_credential(self) -> PublicProviderSettings:
-        settings = self._repository.get()
-        self._secrets.delete(_SECRET_REFERENCE)
-        if settings is not None:
-            self._repository.save(settings.provider, settings.model, settings.endpoint, None)
+        with self._mutation_lock:
+            settings = self._repository.get()
+            if settings is not None:
+                # Update the repository first so a crash after this point leaves the
+                # row pointing at no secret, rather than a dangling secret reference.
+                self._repository.save(settings.provider, settings.model, settings.endpoint, None)
+            self._secrets.delete(_SECRET_REFERENCE)
         return self.get()
 
     def configured_provider(self) -> AgentProvider | None:
@@ -111,16 +138,30 @@ class ProviderSettingsService:
         started = time.monotonic()
         error_code: str | None = None
         try:
-            await provider.complete(
-                ProviderRequest(
-                    system_prompt="Return a short connectivity acknowledgement.",
-                    user_goal="Connection test",
-                    tools=(),
-                    messages=(),
-                    max_output_tokens=16,
-                )
+            await asyncio.wait_for(
+                provider.complete(
+                    ProviderRequest(
+                        system_prompt="Return a short connectivity acknowledgement.",
+                        user_goal="Connection test",
+                        tools=(),
+                        messages=(),
+                        max_output_tokens=16,
+                    )
+                ),
+                timeout=_TEST_TIMEOUT_SECONDS,
             )
             succeeded = True
+        except TimeoutError:
+            succeeded = False
+            error_code = "test_timeout"
+            log_event(
+                _LOGGER,
+                logging.WARNING,
+                "Provider connection test timed out.",
+                component="provider_settings",
+                event_type="provider_test_timeout",
+                timeout_seconds=_TEST_TIMEOUT_SECONDS,
+            )
         except ProviderError as error:
             succeeded = False
             error_code = error.code

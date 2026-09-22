@@ -68,10 +68,23 @@ async function waitForEndpoint(signal?: AbortSignal): Promise<BackendEndpoint> {
       throw new BackendConnectionError("connection_cancelled", "连接已取消。");
     }
 
-    let snapshot: BackendSnapshot;
-    try {
-      snapshot = await invoke<BackendSnapshot>("backend_status");
-    } catch {
+    let snapshot: BackendSnapshot | null = null;
+    // The Tauri launcher can briefly fail to answer while the backend process is
+    // still attaching; retry a few times before declaring the launcher unavailable.
+    for (let attempt = 0; attempt < 3 && snapshot === null; attempt += 1) {
+      try {
+        snapshot = await invoke<BackendSnapshot>("backend_status");
+      } catch {
+        if (attempt === 2) {
+          throw new BackendConnectionError(
+            "launcher_unavailable",
+            "无法读取本地后端启动状态。",
+          );
+        }
+        await delay(200, signal);
+      }
+    }
+    if (snapshot === null) {
       throw new BackendConnectionError(
         "launcher_unavailable",
         "无法读取本地后端启动状态。",

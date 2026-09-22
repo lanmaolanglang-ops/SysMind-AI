@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from statistics import median
 from typing import cast
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, union_all
 from sqlalchemy.orm import Session, sessionmaker
 
 from sysmind.domain.history import (
@@ -76,19 +76,31 @@ class SqlAlchemyHistoryRepository:
             diagnosis = cast(Diagnosis, model)
             # Every table that hangs off a diagnosis counts toward the reported impact so
             # the deletion preview and its revision token describe the whole cascade.
+            # One UNION ALL query instead of a COUNT per child table (N+1).
             dependent = sum(
-                session.scalar(select(func.count()).select_from(table).where(column == record_id))
-                or 0
-                for table, column in (
-                    (DiagnosisToolCallModel, DiagnosisToolCallModel.diagnosis_id),
-                    (DiagnosisFeedback, DiagnosisFeedback.diagnosis_id),
-                    (DiagnosisModelCall, DiagnosisModelCall.diagnosis_id),
-                    (AgentPlanModel, AgentPlanModel.diagnosis_id),
-                    (DiagnosisStepModel, DiagnosisStepModel.diagnosis_id),
-                    (AgentDecisionModel, AgentDecisionModel.diagnosis_id),
-                    (DiagnosisHypothesisModel, DiagnosisHypothesisModel.diagnosis_id),
-                    (AgentStopReasonModel, AgentStopReasonModel.diagnosis_id),
-                    (TaskUserInputModel, TaskUserInputModel.diagnosis_id),
+                row[0]
+                for row in session.execute(
+                    union_all(
+                        *(
+                            select(func.count())
+                            .select_from(table)
+                            .where(column == record_id)
+                            for table, column in (
+                                (DiagnosisToolCallModel, DiagnosisToolCallModel.diagnosis_id),
+                                (DiagnosisFeedback, DiagnosisFeedback.diagnosis_id),
+                                (DiagnosisModelCall, DiagnosisModelCall.diagnosis_id),
+                                (AgentPlanModel, AgentPlanModel.diagnosis_id),
+                                (DiagnosisStepModel, DiagnosisStepModel.diagnosis_id),
+                                (AgentDecisionModel, AgentDecisionModel.diagnosis_id),
+                                (
+                                    DiagnosisHypothesisModel,
+                                    DiagnosisHypothesisModel.diagnosis_id,
+                                ),
+                                (AgentStopReasonModel, AgentStopReasonModel.diagnosis_id),
+                                (TaskUserInputModel, TaskUserInputModel.diagnosis_id),
+                            )
+                        )
+                    )
                 )
             )
             action_plans = (

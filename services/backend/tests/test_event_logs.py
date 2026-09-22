@@ -320,6 +320,7 @@ def test_windows_event_log_adapter_smoke() -> None:
 
 
 def test_replay_parameters_are_revalidated_against_the_allowlists() -> None:
+    """Allowlist revalidation helpers remain for any future opt-in resume path."""
     from sysmind.application.services.log_analysis import _replay_parameters
 
     valid = {

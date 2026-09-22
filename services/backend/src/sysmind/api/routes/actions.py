@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar, cast
+from typing import Annotated, TypeVar, cast
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Path, Query, Request, status
 from starlette.concurrency import run_in_threadpool
 
 from sysmind.actions import ActionCoordinator, ActionError
@@ -19,8 +19,14 @@ from sysmind.api.dto.actions import (
     candidate_response,
     process_candidate_response,
 )
+from sysmind.application.ports.actions import ActionStateConflict
+from sysmind.tools.contracts import ToolUnavailableError
 
 router = APIRouter(prefix="/api/v1/actions", tags=["actions"])
+
+# Opaque ids are UUID-shaped in practice but may be echoed into headers or logs;
+# keep a conservative, header-safe alphabet and bounded length (same as diagnosis ids).
+ActionId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")]
 
 
 def _coordinator(request: Request) -> ActionCoordinator:
@@ -44,6 +50,21 @@ def _run(call: Callable[[], T]) -> T:
         raise HTTPException(
             status_code=_ERROR_STATUS.get(error.code, status.HTTP_409_CONFLICT),
             detail={"code": error.code, "message": str(error)},
+        ) from error
+    except ActionStateConflict as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "invalid_action_state",
+                "message": "Action state changed concurrently.",
+            },
+        ) from error
+    except ToolUnavailableError as error:
+        # Platform adapters raise this when a Windows capability is missing; the
+        # caller can retry later, so surface 503 instead of an opaque 500.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "tool_unavailable", "message": str(error)},
         ) from error
 
 
@@ -94,7 +115,9 @@ async def create_process_close(
     response_model=ActionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_process_termination(close_action_id: str, request: Request) -> ActionResponse:
+async def create_process_termination(
+    close_action_id: ActionId, request: Request
+) -> ActionResponse:
     return ActionResponse.from_record(
         await _run_async(lambda: _coordinator(request).create_process_terminate(close_action_id))
     )
@@ -109,15 +132,19 @@ async def recent_actions(request: Request) -> ActionListResponse:
 
 
 @router.get("/{action_id}", response_model=ActionResponse)
-async def get_action(action_id: str, request: Request) -> ActionResponse:
+async def get_action(action_id: ActionId, request: Request) -> ActionResponse:
     record = await run_in_threadpool(_coordinator(request).get, action_id)
     if record is None:
-        raise HTTPException(status_code=404, detail="Action not found.")
+        # Same shape as ActionError("action_not_found", ...) from _run.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "action_not_found", "message": "Action not found."},
+        )
     return ActionResponse.from_record(record)
 
 
 @router.post("/{action_id}/confirm", response_model=ConsentResponse)
-async def confirm_action(action_id: str, request: Request) -> ConsentResponse:
+async def confirm_action(action_id: ActionId, request: Request) -> ConsentResponse:
     record, ticket, expires = await _run_async(
         lambda: _coordinator(request).confirm(action_id)
     )
@@ -127,7 +154,7 @@ async def confirm_action(action_id: str, request: Request) -> ConsentResponse:
 
 
 @router.post("/{action_id}/reject", response_model=ActionResponse)
-async def reject_action(action_id: str, request: Request) -> ActionResponse:
+async def reject_action(action_id: ActionId, request: Request) -> ActionResponse:
     return ActionResponse.from_record(
         await _run_async(lambda: _coordinator(request).reject(action_id))
     )
@@ -135,7 +162,7 @@ async def reject_action(action_id: str, request: Request) -> ActionResponse:
 
 @router.post("/{action_id}/execute", response_model=ActionResponse)
 async def execute_action(
-    action_id: str, payload: ExecuteActionRequest, request: Request
+    action_id: ActionId, payload: ExecuteActionRequest, request: Request
 ) -> ActionResponse:
     return ActionResponse.from_record(
         await _run_async(lambda: _coordinator(request).execute(action_id, payload.ticket))
@@ -145,7 +172,7 @@ async def execute_action(
 @router.post(
     "/{action_id}/recovery", response_model=ActionResponse, status_code=status.HTTP_201_CREATED
 )
-async def create_recovery(action_id: str, request: Request) -> ActionResponse:
+async def create_recovery(action_id: ActionId, request: Request) -> ActionResponse:
     return ActionResponse.from_record(
         await _run_async(lambda: _coordinator(request).create_restore(action_id))
     )

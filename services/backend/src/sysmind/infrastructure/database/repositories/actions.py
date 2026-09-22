@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, cast
 
@@ -8,7 +9,7 @@ from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
-from sysmind.application.ports.actions import ActionRepository
+from sysmind.application.ports.actions import ActionRepository, ActionStateConflict
 from sysmind.domain.actions import (
     DISABLE_STARTUP_TOOL,
     RESTORE_STARTUP_TOOL,
@@ -65,12 +66,16 @@ class SqlAlchemyActionRepository(ActionRepository):
     ) -> ActionRecord:
         now = datetime.fromisoformat(created_at)
         with self._sessions.begin() as session:
-            session.add(
-                ActionPlanModel(
-                    id=plan_id, diagnosis_id=diagnosis_id, status="proposed", created_at=now
+            # Get-or-create: a plan row may already exist when several actions share a
+            # plan_id; blindly inserting would raise an integrity error.
+            plan = session.get(ActionPlanModel, plan_id)
+            if plan is None:
+                session.add(
+                    ActionPlanModel(
+                        id=plan_id, diagnosis_id=diagnosis_id, status="proposed", created_at=now
+                    )
                 )
-            )
-            session.flush()
+                session.flush()
             model = ActionModel(
                 id=action_id,
                 plan_id=plan_id,
@@ -136,7 +141,8 @@ class SqlAlchemyActionRepository(ActionRepository):
         self,
         action_id: str,
         *,
-        status: str,
+        expected_statuses: Sequence[ActionStatus],
+        status: ActionStatus,
         updated_at: str,
         recovery_id: str | None = None,
         error_code: str | None = None,
@@ -144,16 +150,36 @@ class SqlAlchemyActionRepository(ActionRepository):
     ) -> ActionRecord:
         now = datetime.fromisoformat(updated_at)
         with self._sessions.begin() as session:
+            values: dict[str, object] = {
+                "status": status,
+                "updated_at": now,
+                "error_code": error_code,
+                "error_message": error_message,
+            }
+            if recovery_id is not None:
+                values["recovery_id"] = recovery_id
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(ActionModel)
+                    .where(
+                        ActionModel.id == action_id,
+                        ActionModel.status.in_(tuple(expected_statuses)),
+                    )
+                    .values(**values)
+                ),
+            )
+            if result.rowcount != 1:
+                if session.get(ActionModel, action_id) is None:
+                    raise KeyError(action_id)
+                raise ActionStateConflict(action_id)
             model = session.get(ActionModel, action_id)
-            if model is None:
+            if model is None:  # pragma: no cover - protected by the successful update
                 raise KeyError(action_id)
-            model.status, model.updated_at = status, now
-            model.error_code, model.error_message = error_code, error_message
             plan = session.get(ActionPlanModel, model.plan_id)
             if plan is not None:
                 plan.status = status
             if recovery_id is not None:
-                model.recovery_id = recovery_id
                 session.add(
                     RecoveryRecordModel(
                         id=recovery_id, action_id=action_id, status="available", created_at=now
@@ -238,7 +264,21 @@ class SqlAlchemyActionRepository(ActionRepository):
             recovery = session.get(RecoveryRecordModel, recovery_id)
             if recovery is None:
                 raise KeyError(recovery_id)
-            recovery.status, recovery.consumed_at = "consumed", now
+            # Compare-and-set: a recovery record is consumed by exactly one caller.
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    update(RecoveryRecordModel)
+                    .where(
+                        RecoveryRecordModel.id == recovery_id,
+                        RecoveryRecordModel.status == "available",
+                        RecoveryRecordModel.consumed_at.is_(None),
+                    )
+                    .values(status="consumed", consumed_at=now)
+                ),
+            )
+            if result.rowcount != 1:
+                raise KeyError(recovery_id)
             original = session.get(ActionModel, recovery.action_id)
             if original is not None:
                 original.recovery_id = None

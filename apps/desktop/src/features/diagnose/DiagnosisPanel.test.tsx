@@ -131,7 +131,7 @@ describe("DiagnosisPanel", () => {
     fireEvent.change(screen.getByLabelText("描述现象"), { target: { value: "应用总是崩溃" } });
     fireEvent.click(screen.getByRole("button", { name: "开始诊断" }));
     await waitFor(() => {
-      expect(post).toHaveBeenCalledWith("/api/v1/diagnoses", { question: "应用总是崩溃" });
+      expect(post).toHaveBeenCalledWith("/api/v1/diagnoses", { question: "应用总是崩溃" }, undefined);
     });
   });
 
@@ -221,6 +221,7 @@ describe("DiagnosisPanel", () => {
       expect(post).toHaveBeenCalledWith(
         `/api/v1/diagnoses/${waiting.id}/inputs`,
         { answer: "开机后十分钟" },
+        undefined,
       );
     });
   });

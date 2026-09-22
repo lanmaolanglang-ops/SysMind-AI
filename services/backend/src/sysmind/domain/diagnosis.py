@@ -26,6 +26,11 @@ StopReason: TypeAlias = Literal[
 ]
 
 
+def _require_unit_interval(name: str, value: float) -> None:
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be between 0 and 1, got {value}.")
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceReference:
     tool_call_id: str
@@ -43,14 +48,19 @@ class Finding:
     confidence: float
     evidence: tuple[EvidenceReference, ...]
 
+    def __post_init__(self) -> None:
+        _require_unit_interval("confidence", self.confidence)
 
-_NON_DIAGNOSTIC_FINDING_CODES = {
-    "gateway_icmp_no_response",
-    "gpu_metadata_only",
-    "insufficient_signal",
-    "proxy_enabled",
-    "stopped_automatic_services",
-}
+
+_NON_DIAGNOSTIC_FINDING_CODES = frozenset(
+    {
+        "gateway_icmp_no_response",
+        "gpu_metadata_only",
+        "insufficient_signal",
+        "proxy_enabled",
+        "stopped_automatic_services",
+    }
+)
 
 
 def is_diagnostic_finding(finding: Finding) -> bool:
@@ -74,6 +84,9 @@ class DiagnosisHypothesis:
     confidence: float
     status: HypothesisStatus
 
+    def __post_init__(self) -> None:
+        _require_unit_interval("confidence", self.confidence)
+
 
 @dataclass(frozen=True, slots=True)
 class DiagnosisReport:
@@ -85,6 +98,9 @@ class DiagnosisReport:
     limitations: tuple[str, ...]
     model_explanation: str
     hypotheses: tuple[DiagnosisHypothesis, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_unit_interval("confidence", self.confidence)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +128,11 @@ class DiagnosisRecord:
     max_tool_calls: int = 8
     stop_reason: StopReason | None = None
 
+    def __post_init__(self) -> None:
+        # `frozen=True` does not deep-freeze containers; copy each plan step mapping so a
+        # caller cannot mutate a record that has already been persisted.
+        object.__setattr__(self, "plan", tuple(dict(step) for step in self.plan))
+
 
 @dataclass(frozen=True, slots=True)
 class DiagnosisToolCall:
@@ -125,3 +146,7 @@ class DiagnosisToolCall:
     error_code: str | None
     started_at: str | None = None
     finished_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.summary is not None:
+            object.__setattr__(self, "summary", dict(self.summary))

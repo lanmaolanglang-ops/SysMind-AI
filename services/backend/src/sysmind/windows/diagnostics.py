@@ -24,8 +24,17 @@ from sysmind.domain.diagnostics import (
     ProcessInfo,
 )
 from sysmind.tools.contracts import ToolCancelledError, ToolUnavailableError
+from sysmind.windows.identity import process_item_id
 
-_GPU_COMMAND = (
+# Windows PowerShell 5.1 emits the console code page (cp936 on Chinese Windows),
+# so forcing Python to decode UTF-8 is not enough — the child must also write UTF-8
+# or GPU names containing non-ASCII characters arrive as mojibake.
+_POWERSHELL_UTF8_PREAMBLE = (
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "$OutputEncoding = [Console]::OutputEncoding;"
+)
+
+_GPU_COMMAND = _POWERSHELL_UTF8_PREAMBLE + (
     "Get-CimInstance Win32_VideoController | "
     "Select-Object Name,AdapterRAM,DriverVersion | ConvertTo-Json -Compress"
 )
@@ -33,7 +42,7 @@ _GPU_COMMAND = (
 # Samples the WDDM GPU counters once. `-MaxSamples 1` still costs one sample
 # interval (~1s), which is why this is a separate, individually timed call rather
 # than being folded into the metadata query above.
-_GPU_TELEMETRY_COMMAND = (
+_GPU_TELEMETRY_COMMAND = _POWERSHELL_UTF8_PREAMBLE + (
     "$s = Get-Counter -Counter '\\GPU Engine(*)\\Utilization Percentage',"
     "'\\GPU Adapter Memory(*)\\Dedicated Usage' -MaxSamples 1 -ErrorAction Stop;"
     "@($s.CounterSamples) | ForEach-Object {"
@@ -80,7 +89,9 @@ def _summarize_gpu_telemetry(
         elif kind == "m":
             saw_memory = True
             memory_total += int(value)
-    utilization = round(min(100.0, max(engines.values())), 1) if engines else None
+    utilization = (
+        round(min(100.0, max(0.0, max(engines.values()))), 1) if engines else None
+    )
     memory = memory_total if saw_memory else None
     if utilization is None and memory is None:
         return None
@@ -112,10 +123,25 @@ def _collect_gpu_telemetry(powershell_path: str) -> tuple[float | None, int | No
     except (json.JSONDecodeError, TypeError, ValueError):
         return None
     rows = payload if isinstance(payload, list) else [payload]
+    dicts = [row for row in rows if isinstance(row, dict)]
     try:
-        return _summarize_gpu_telemetry([row for row in rows if isinstance(row, dict)])
+        summary = _summarize_gpu_telemetry(dicts)
     except (TypeError, ValueError, OverflowError):
         return None
+    if summary is None:
+        return None
+    utilization, memory = summary
+    # Dedicated-usage samples are keyed by LUID only. When more than one adapter
+    # reports usage the total is multi-GPU VRAM and must not be presented as a
+    # single adapter's memory_used_bytes.
+    memory_sources = {
+        row.get("a")
+        for row in dicts
+        if row.get("t") == "m" and isinstance(row.get("a"), str)
+    }
+    if len(memory_sources) > 1:
+        memory = None
+    return utilization, memory
 
 
 def normalized_cpu_percent(raw_percent: float, logical_cores: int | None = None) -> float:
@@ -157,10 +183,16 @@ class WindowsSystemProbe:
         )
 
     def operating_system(self) -> OperatingSystemInfo:
+        # Windows exposes the marketing release via platform.release() ("10"/"11")
+        # and "10.0.<build>" via platform.version(). Those two were previously swapped,
+        # so the reported build was the release name.
+        release = platform.release()
+        nt_version = platform.version()
+        build = nt_version.rsplit(".", 1)[-1] if "." in nt_version else nt_version
         return OperatingSystemInfo(
             name=platform.system() or "Windows",
-            version=platform.version(),
-            build=platform.release(),
+            version=release or nt_version,
+            build=build,
             architecture=platform.machine(),
         )
 
@@ -284,12 +316,14 @@ class WindowsProcessProbe:
     def _read_process(process: psutil.Process) -> ProcessInfo | None:
         try:
             memory = process.memory_info()
+            created_at = process.create_time()
             return ProcessInfo(
                 pid=process.pid,
                 name=process.name(),
                 cpu_percent=normalized_cpu_percent(process.cpu_percent(interval=None)),
                 memory_bytes=memory.rss,
                 memory_percent=round(process.memory_percent(), 2),
+                item_id=process_item_id(process.pid, created_at),
             )
         except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
             return None

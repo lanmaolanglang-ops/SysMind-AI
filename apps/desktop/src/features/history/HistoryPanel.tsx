@@ -31,9 +31,11 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [baseline, setBaseline] = useState<BaselineMetric[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const controller = new AbortController();
+    setLoading(true);
     void Promise.all([
       getRecentScans(client, controller.signal),
       recentDiagnoses(client, controller.signal),
@@ -58,6 +60,9 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
       })
       .catch(() => {
         if (!controller.signal.aborted) setError("历史记录暂时不可用。");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
   }, [client, reloadKey]);
@@ -104,6 +109,10 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
     queued: "等待开始", running: "正在进行", completed: "已完成", partial: "部分完成",
     failed: "未完成", cancelled: "已取消", interrupted: "意外中断", succeeded: "操作成功",
     rejected: "已拒绝", close_pending: "等待进一步决定",
+    proposed: "待确认", awaiting_second_confirmation: "等待二次确认",
+    confirmed: "已确认", executing: "执行中", verifying: "校验中",
+    verification_failed: "校验失败", expired: "确认已过期", target_changed: "目标已变化",
+    waiting_user_input: "等待补充信息",
   };
 
   return (
@@ -129,7 +138,7 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
           <button type="button" onClick={() => setImpact(null)}>取消</button>
         </div>
       </div>}
-      {!error && visible.length === 0 && <p>暂无数据。先运行一次扫描或诊断。</p>}
+      {!error && !loading && visible.length === 0 && <p>暂无数据。先运行一次扫描或诊断。</p>}
       <ul className="history-list">{visible.map((item) => <li key={`${item.kind}-${item.id}`}>
         <div><strong>{item.title}</strong><small>{kindLabels[item.kind]}</small><details className="history-technical"><summary>记录编号</summary><code>{item.id}</code></details></div>
         <span>{statusLabels[item.status] ?? "状态未知"}{item.timestamp ? ` · ${new Date(item.timestamp).toLocaleString("zh-CN")}` : ""}</span>

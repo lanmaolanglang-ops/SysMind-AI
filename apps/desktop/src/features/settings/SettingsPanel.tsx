@@ -18,6 +18,8 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [retentionDays, setRetentionDays] = useState(30);
+  const [cleanupArmed, setCleanupArmed] = useState(false);
+  const [clearCredentialArmed, setClearCredentialArmed] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,6 +81,7 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
       .then((value) => {
         setSettings(value);
         setApiKey("");
+        setClearCredentialArmed(false);
         setMessage("在线解释的访问密钥已清除，诊断将继续使用本地规则。");
       })
       .catch(() =>
@@ -98,7 +101,10 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
   const cleanup = () => {
     setBusy(true);
     void runCleanup(client)
-      .then((value) => setMessage(`清理完成：扫描 ${value.deleted_scans}、诊断 ${value.deleted_diagnoses}、日志 ${value.deleted_log_analyses}；保护 ${value.protected_records} 条审计关联记录。`))
+      .then((value) => {
+        setCleanupArmed(false);
+        setMessage(`清理完成：扫描 ${value.deleted_scans}、诊断 ${value.deleted_diagnoses}、日志 ${value.deleted_log_analyses}；保护 ${value.protected_records} 条审计关联记录。`);
+      })
       .catch(() => setMessage("清理未完成，现有数据保持不变。"))
       .finally(() => setBusy(false));
   };
@@ -128,7 +134,14 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
       <div className="settings-actions">
         <button type="button" className="primary-action" onClick={save} disabled={busy || !model.trim() || !endpoint.trim()}>保存设置</button>
         <button type="button" onClick={test} disabled={busy || !settings?.configured}>测试连接</button>
-        <button type="button" onClick={clear} disabled={busy || !settings?.configured}>清除访问密钥</button>
+        {clearCredentialArmed ? (
+          <>
+            <button type="button" className="danger-action" onClick={clear} disabled={busy}>确认清除访问密钥</button>
+            <button type="button" onClick={() => setClearCredentialArmed(false)} disabled={busy}>取消</button>
+          </>
+        ) : (
+          <button type="button" onClick={() => setClearCredentialArmed(true)} disabled={busy || !settings?.configured}>清除访问密钥</button>
+        )}
       </div>
       {message && <p role="status" className="diagnosis-message">{message}</p>}
       <div className="retention-settings">
@@ -136,8 +149,20 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
         <label>天数<input type="number" min="7" max="3650" value={retentionDays} onChange={(event) => { const parsed = Number(event.target.value); setRetentionDays(Number.isFinite(parsed) ? parsed : 0); }} /></label>
         <div className="settings-actions">
           <button type="button" onClick={saveDataPolicy} disabled={busy || !Number.isFinite(retentionDays) || retentionDays < 7 || retentionDays > 3650}>保存策略</button>
-          <button type="button" onClick={cleanup} disabled={busy}>立即清理</button>
+          {cleanupArmed ? (
+            <>
+              <button type="button" className="danger-action" onClick={cleanup} disabled={busy}>确认清理</button>
+              <button type="button" onClick={() => setCleanupArmed(false)} disabled={busy}>取消</button>
+            </>
+          ) : (
+            <button type="button" onClick={() => setCleanupArmed(true)} disabled={busy}>立即清理</button>
+          )}
         </div>
+        {cleanupArmed && (
+          <p role="status" className="diagnosis-message">
+            将按当前保留策略清理已结束的扫描、日志和未关联动作的诊断。动作与恢复审计不会删除。此操作不可撤销。
+          </p>
+        )}
       </div>
     </section>
   );

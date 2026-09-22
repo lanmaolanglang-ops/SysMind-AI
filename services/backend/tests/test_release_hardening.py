@@ -11,6 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from sysmind.actions import ActionError
+from sysmind.agent.context import build_provider_request
+from sysmind.agent.memory import WorkingMemory
 from sysmind.api.dto.agent_tasks import StartAgentTaskRequest
 from sysmind.domain.actions import MutationResult
 from sysmind.infrastructure.database import create_session_factory
@@ -18,7 +20,7 @@ from sysmind.infrastructure.database.repositories import SqlAlchemyActionReposit
 from sysmind.observability.logging import log_event
 from sysmind.reports.redaction import redact_text
 from sysmind.security import ConsentError, ConsentService
-from sysmind.security.redaction import is_sensitive_key
+from sysmind.security.redaction import is_sensitive_key, redact_arguments
 from tests.fakes.actions import FakeStartupActions, coordinator
 
 BACKSLASH = chr(92)
@@ -120,6 +122,46 @@ def test_redact_text_covers_user_paths_ips_and_mac_addresses() -> None:
     assert "fe80::1f" not in redacted
     assert "00-1A-2B-3C-4D-5E" not in redacted
     assert "a@b.com" not in redacted
+
+
+def test_secret_redaction_is_recursive_and_covers_common_credential_forms() -> None:
+    jwt = "eyJabcdefghijk.abcdefghijklmnop.abcdefghijklmnop"
+    payload = {
+        "Authorization": "Bearer top-secret-token",
+        "nested": [
+            {"api_key": "sk-secret"},
+            f"password='do not keep' jwt={jwt}",
+        ],
+    }
+
+    redacted = redact_arguments(payload)
+    rendered = json.dumps(redacted)
+
+    assert "top-secret-token" not in rendered
+    assert "sk-secret" not in rendered
+    assert "do not keep" not in rendered
+    assert jwt not in rendered
+
+
+def test_working_memory_and_provider_context_never_retain_raw_summary_secrets() -> None:
+    memory = WorkingMemory()
+    memory.remember_tool_result(
+        name="system.cpu",
+        version="1.0",
+        arguments={},
+        status="completed",
+        summary={"nested": {"token": "memory-secret"}, "message": "api_key=prompt-secret"},
+        error_code=None,
+    )
+
+    request = build_provider_request(user_goal="password=user-secret", tools=(), memory=memory)
+    rendered = json.dumps(
+        {"goal": request.user_goal, "messages": request.messages}, ensure_ascii=False
+    )
+
+    assert "memory-secret" not in rendered
+    assert "prompt-secret" not in rendered
+    assert "user-secret" not in rendered
 
 
 def test_redact_text_keeps_timestamps_and_non_user_paths() -> None:

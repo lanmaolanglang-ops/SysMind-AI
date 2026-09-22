@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypeAlias
 
 HistoryKind = Literal["scan", "diagnosis", "log"]
+# Allowed audit reasons for a bulk retention cleanup run.
+CleanupTrigger: TypeAlias = Literal["manual", "startup", "retention"]
 
 
 @dataclass(frozen=True, slots=True)

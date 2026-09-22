@@ -4,11 +4,11 @@ from dataclasses import asdict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from sysmind.domain.history import BaselineMetric, CleanupResult, DeletionImpact
+from sysmind.domain.history import BaselineMetric, CleanupResult, DeletionImpact, HistoryKind
 
 
 class DeletionImpactResponse(BaseModel):
-    kind: str
+    kind: HistoryKind
     record_id: str
     revision: str
     deletable: bool

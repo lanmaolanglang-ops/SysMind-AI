@@ -92,15 +92,18 @@ The Tauri process owns the exact child process it creates. On Windows, the child
 - Logs are structured JSON and redact common secret fields.
 - Collectors are application-owned, versioned, timeout-bounded, and read-only.
 - GPU detection uses one fixed application-authored CIM query; no user or model input reaches PowerShell.
-- The Windows GPU adapter reports metadata only and explicitly marks real-time utilization and
-  used-memory telemetry unavailable instead of estimating either value.
+- The Windows GPU adapter reports GPU/driver metadata and also samples real-time utilization and
+  used dedicated memory once via WDDM performance counters. Those counters are indexed by LUID and
+  \Win32_VideoController\ does not expose LUIDs, so the reading is system-level (not per-GPU).
+  When the counters are unavailable the telemetry fields fall back to unavailable instead of being
+  estimated.
 - History deletion is revision-bound. Active work and diagnoses linked to controlled-action audit
   are protected; retention never deletes actions, confirmations, action events, or recovery records.
 - Event Log collection uses the Windows Event Log API directly; callers cannot provide XPath, arbitrary channels, or commands.
 - Event summaries redact user-profile names, account identifiers, and IPv4 addresses before persistence. Raw event XML is not stored.
 - The Tool Registry is an exact allowlist; unknown tools, invalid arguments, state-changing risk levels, confirmation-requiring tools, and privilege-requiring tools are rejected.
 - Agent prompts treat goals and tool evidence as untrusted data. State-changing startup actions use a separate application-authored executor and cannot be selected by a model.
-- Confirmation tickets are single-use, expire within two minutes, and bind the action, target revision, parameters, and sidecar session; only their digest is audited.
+- Confirmation tickets are single-use, bind the action, target revision, parameters, and sidecar session, and last at most two minutes (`ConsentService` default TTL 120s). Process-action tickets are additionally capped to the remaining 30-second plan window so a ticket never outlives its own plan; only their digest is audited.
 - Network tools use fixed application allowlists (`one.one.one.one`, `www.microsoft.com`, `1.1.1.1`, and `8.8.8.8`) plus hard count and timeout bounds. Starting a network diagnosis is the explicit user action that authorizes this limited traffic.
 - A configured remote Provider may receive the redacted current question, a minimal device summary,
   eligible read-only tool descriptions, and bounded redacted observation/finding summaries. Complete

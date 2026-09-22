@@ -43,7 +43,7 @@ Last updated: 2026-08-22
 
 Phase 6 targets Windows 10/11 x64 and per-user installation. It adds no administrator helper, service
 control, arbitrary file deletion, generic registry writes, network changes, or command execution.
-Downgrades are unsupported because database migrations are forward-only.
+Migration scripts implement both upgrade and downgrade, and the round trip is covered by tests; product recovery policy is still forward-only (roll-forward fixes, not database downgrades).
 
 ## History deletion and retention
 

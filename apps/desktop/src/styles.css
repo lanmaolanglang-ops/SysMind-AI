@@ -1113,6 +1113,8 @@ h1 {
 .crash-list,
 .event-list {
   border-top: 1px solid #e0e5df;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .crash-row {
@@ -1292,6 +1294,8 @@ h1 {
   margin: 0;
   padding: 14px 0;
   list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .agent-timeline li {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiClient } from "../../services/api-client";
@@ -29,6 +29,53 @@ describe("SettingsPanel", () => {
     expect(key).toHaveValue("");
     expect(put).toHaveBeenCalledWith("/api/v1/settings", expect.objectContaining({
       api_key: "secret-value",
-    }));
+    }), undefined);
+  });
+
+  it("requires an explicit in-panel confirmation before history cleanup", async () => {
+    const client = new ApiClient({ baseUrl: "http://127.0.0.1:45000", sessionToken: "test" });
+    vi.spyOn(client, "get").mockImplementation((path) => Promise.resolve(path.includes("retention")
+      ? { retention_days: 30 }
+      : { provider: "local-rules", model: "", endpoint: "", configured: false,
+          updated_at: null, restart_required: false }));
+    const postJson = vi.spyOn(client, "postJson").mockResolvedValue({
+      deleted_scans: 1, deleted_diagnoses: 0, deleted_log_analyses: 0,
+      protected_records: 0, completed_at: "now",
+    });
+    render(<SettingsPanel client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "立即清理" }));
+    expect(postJson).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "确认清理" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "取消" })).toBeInTheDocument();
+    expect(screen.getByText(/此操作不可撤销/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认清理" }));
+    await waitFor(() => expect(postJson).toHaveBeenCalledWith(
+      "/api/v1/history/cleanup",
+      { confirm: "cleanup" },
+      undefined,
+    ));
+    expect(await screen.findByText(/清理完成/)).toBeInTheDocument();
+  });
+
+  it("cancels cleanup without calling the API", async () => {
+    const client = new ApiClient({ baseUrl: "http://127.0.0.1:45000", sessionToken: "test" });
+    vi.spyOn(client, "get").mockImplementation((path) => Promise.resolve(path.includes("retention")
+      ? { retention_days: 30 }
+      : { provider: "local-rules", model: "", endpoint: "", configured: false,
+          updated_at: null, restart_required: false }));
+    const postJson = vi.spyOn(client, "postJson").mockResolvedValue({
+      deleted_scans: 0, deleted_diagnoses: 0, deleted_log_analyses: 0,
+      protected_records: 0, completed_at: "now",
+    });
+    render(<SettingsPanel client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "立即清理" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(postJson).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "立即清理" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "确认清理" })).not.toBeInTheDocument();
   });
 });

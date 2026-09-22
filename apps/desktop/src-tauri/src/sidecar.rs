@@ -32,10 +32,12 @@ pub struct BackendSnapshot {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EndpointHandshake {
+    event: String,
     host: String,
     port: u16,
-    backend_version: Option<String>,
+    backend_version: String,
     api_version: String,
 }
 
@@ -156,6 +158,17 @@ impl BackendManager {
                 drop(runtime);
                 let _ = child.kill();
                 let _ = child.wait();
+                // A concurrent shutdown may have raced past an empty `child` slot and
+                // returned without resetting the snapshot. Clear a stuck "starting"
+                // state so the UI can start again without an app restart.
+                let mut runtime = lock_runtime(&self.runtime);
+                if runtime.child.is_none() && runtime.snapshot.state == "starting" {
+                    runtime.snapshot = BackendSnapshot {
+                        state: "disconnected",
+                        endpoint: None,
+                        error: Some("Startup was cancelled.".to_string()),
+                    };
+                }
                 return;
             }
             runtime.child = Some(child);
@@ -243,6 +256,21 @@ impl BackendManager {
         };
 
         let Some(mut owned_child) = child.take() else {
+            // No child handle yet (start() lost the race before publishing it).
+            // Still reset the snapshot so the UI cannot stick on "starting".
+            let mut runtime = lock_runtime(&self.runtime);
+            if runtime.child.is_none() {
+                let previous_error = runtime.snapshot.error.take();
+                runtime.snapshot = BackendSnapshot {
+                    state: "disconnected",
+                    endpoint: None,
+                    error: previous_error.or_else(|| Some("Startup was cancelled.".to_string())),
+                };
+                #[cfg(windows)]
+                {
+                    runtime.job = None;
+                }
+            }
             return;
         };
         if let Some(endpoint) = endpoint {
@@ -335,6 +363,12 @@ fn monitor_child_process(runtime: Arc<Mutex<BackendRuntime>>, generation: u64) {
             }
             Ok(None) => {}
             Err(error) => {
+                // Drop the handle so a later start() is not blocked by `child.is_some()`.
+                managed.child = None;
+                #[cfg(windows)]
+                {
+                    managed.job = None;
+                }
                 managed.snapshot = BackendSnapshot {
                     state: "disconnected",
                     endpoint: None,
@@ -383,11 +417,19 @@ fn await_handshake(
 /// Enforces the published sidecar handshake contract
 /// (contracts/schemas/sidecar-handshake.schema.json) before any connection is trusted.
 fn handshake_contract_error(handshake: &EndpointHandshake) -> Option<String> {
+    if handshake.event != "sysmind_endpoint" {
+        return Some(format!(
+            "Backend handshake event mismatch: expected sysmind_endpoint, got {}.",
+            handshake.event
+        ));
+    }
     if handshake.host != "127.0.0.1" {
         return Some("Backend attempted to use a non-loopback host.".to_string());
     }
-    let backend_version = handshake.backend_version.as_deref().unwrap_or_default();
-    if backend_version.trim().is_empty() {
+    if handshake.port == 0 {
+        return Some("Backend handshake published an invalid port.".to_string());
+    }
+    if handshake.backend_version.trim().is_empty() {
         return Some("Backend handshake omitted its backend version.".to_string());
     }
     if handshake.api_version != EXPECTED_API_VERSION {
@@ -598,9 +640,10 @@ mod tests {
     fn parses_loopback_endpoint_handshake() {
         let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
         let handshake = parse_handshake(line).expect("valid handshake");
+        assert_eq!(handshake.event, "sysmind_endpoint");
         assert_eq!(handshake.host, "127.0.0.1");
         assert_eq!(handshake.port, 43123);
-        assert_eq!(handshake.backend_version.as_deref(), Some("0.1.0"));
+        assert_eq!(handshake.backend_version, "0.1.0");
         assert_eq!(handshake.api_version, EXPECTED_API_VERSION);
         assert!(handshake_contract_error(&handshake).is_none());
     }
@@ -611,8 +654,40 @@ mod tests {
     }
 
     #[test]
+    fn rejects_handshake_missing_event() {
+        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        assert!(parse_handshake(line).is_none());
+    }
+
+    #[test]
+    fn rejects_handshake_with_unknown_fields() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0","extra":1}"#;
+        assert!(parse_handshake(line).is_none());
+    }
+
+    #[test]
+    fn rejects_zero_port_handshake() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":0,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        let handshake = parse_handshake(line).expect("parseable handshake");
+        assert_eq!(
+            handshake_contract_error(&handshake).as_deref(),
+            Some("Backend handshake published an invalid port.")
+        );
+    }
+
+    #[test]
+    fn rejects_wrong_event_name() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"other","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        let handshake = parse_handshake(line).expect("parseable handshake");
+        assert!(handshake_contract_error(&handshake)
+            .as_deref()
+            .unwrap_or_default()
+            .contains("event mismatch"));
+    }
+
+    #[test]
     fn detects_protocol_mismatch() {
-        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"2.0"}"#;
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"2.0"}"#;
         let handshake = parse_handshake(line).expect("valid handshake");
         assert_ne!(handshake.api_version, EXPECTED_API_VERSION);
         assert_eq!(
@@ -622,22 +697,18 @@ mod tests {
     }
 
     #[test]
-    fn handshake_without_backend_version_fails_the_contract() {
-        let line = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"api_version":"1.0"}"#;
-        let handshake = parse_handshake(line).expect("parseable handshake");
-        assert_eq!(
-            handshake_contract_error(&handshake).as_deref(),
-            Some("Backend handshake omitted its backend version.")
-        );
+    fn handshake_without_backend_version_is_not_parseable() {
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"api_version":"1.0"}"#;
+        assert!(parse_handshake(line).is_none());
 
-        let blank = r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"  ","api_version":"1.0"}"#;
+        let blank = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"  ","api_version":"1.0"}"#;
         let handshake = parse_handshake(blank).expect("parseable handshake");
         assert!(handshake_contract_error(&handshake).is_some());
     }
 
     #[test]
     fn non_loopback_handshake_fails_the_contract() {
-        let line = r#"SYSMIND_ENDPOINT {"host":"0.0.0.0","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
+        let line = r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"0.0.0.0","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#;
         let handshake = parse_handshake(line).expect("parseable handshake");
         assert_eq!(
             handshake_contract_error(&handshake).as_deref(),
@@ -678,7 +749,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         tx.send("backend ready on port 4000".to_string()).unwrap();
         tx.send(
-            r#"SYSMIND_ENDPOINT {"host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#
+            r#"SYSMIND_ENDPOINT {"event":"sysmind_endpoint","host":"127.0.0.1","port":43123,"backend_version":"0.1.0","api_version":"1.0"}"#
                 .to_string(),
         )
         .unwrap();

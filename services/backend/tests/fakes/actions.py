@@ -140,7 +140,22 @@ def coordinator(
                                         "field_path": "$",
                                     }
                                 ],
-                            }
+                            },
+                            {
+                                "id": "finding-startup",
+                                "code": "startup_inventory",
+                                "severity": "low",
+                                "title": "startup evidence",
+                                "explanation": "evidence",
+                                "recommendation": "review",
+                                "confidence": 0.7,
+                                "evidence": [
+                                    {
+                                        "tool_call_id": "startup-call",
+                                        "field_path": "$.items[0]",
+                                    }
+                                ],
+                            },
                         ],
                         "confidence": 0.8,
                         "limitations": [],
@@ -159,7 +174,17 @@ def coordinator(
                 arguments_json="{}",
                 arguments_hash="c" * 64,
                 status="completed",
-                result_json="{}",
+                result_json=json.dumps(
+                    {
+                        "items": [
+                            {
+                                "item_id": "a" * 64,
+                                "name": "Example",
+                                "source": "user_run",
+                            }
+                        ]
+                    }
+                ),
                 started_at=now,
                 finished_at=now,
                 duration_ms=1,
@@ -174,7 +199,9 @@ def coordinator(
                 arguments_json="{}",
                 arguments_hash="f" * 64,
                 status="completed",
-                result_json=json.dumps([{"pid": 4242, "name": "Editor.exe"}]),
+                result_json=json.dumps(
+                    [{"item_id": "d" * 64, "pid": 4242, "name": "Editor.exe"}]
+                ),
                 started_at=now,
                 finished_at=now,
                 duration_ms=1,

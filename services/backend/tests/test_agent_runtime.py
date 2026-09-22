@@ -312,8 +312,14 @@ def test_sse_reconnect_uses_event_cursor(settings: Settings, auth_headers: dict[
         reconnect_headers = {**auth_headers, "Last-Event-ID": str(event_ids[0])}
         reconnect = client.get(f"/api/v1/tasks/{payload['id']}/events", headers=reconnect_headers)
         replayed = ids(reconnect.text)
+        # Last-Event-ID is exclusive: the cursor event itself is never replayed.
         assert event_ids[0] not in replayed
-        assert event_ids[-1] in replayed
+        if len(event_ids) == 1:
+            # Single-event stream: first and last are the same id, so "last is
+            # replayed" would contradict the exclusive cursor assertion above.
+            assert event_ids[-1] not in replayed
+        else:
+            assert event_ids[-1] in replayed
 
 
 def test_startup_marks_active_agent_task_interrupted_without_replay(

@@ -359,6 +359,32 @@ def test_plan_steps_and_decisions_are_persisted_for_audit(settings: Settings) ->
     assert counts == (1, 1, 1)
     assert reason == "检查内存压力"
 
+    revised = validate_plan(
+        PlanPayload(
+            problem_category="performance",
+            confidence=0.9,
+            steps=(PlanStepPayload(tool="system.cpu@1.0", reason="检查 CPU 压力"),),
+        ),
+        _registry(),
+    )
+    repository.save_agent_plan(
+        "phase31-audit",
+        provider="fake-planner",
+        plan=revised.as_dict(),
+        revision=2,
+        created_at="2026-08-23T00:00:03+00:00",
+    )
+    record = repository.get("phase31-audit")
+    assert record is not None
+    assert record.plan == (
+        {
+            "tool": "system.cpu@1.0",
+            "purpose": "检查 CPU 压力",
+            "reason": "检查 CPU 压力",
+            "arguments": {},
+        },
+    )
+
 
 def test_revision_budget_is_clamped_and_shared_by_both_planners() -> None:
     def call(index: int) -> DiagnosisToolCall:

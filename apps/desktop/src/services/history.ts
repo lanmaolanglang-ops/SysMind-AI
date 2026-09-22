@@ -56,4 +56,8 @@ export const saveRetention = (client: ApiClient, retentionDays: number, signal?:
   );
 
 export const runCleanup = (client: ApiClient, signal?: AbortSignal) =>
-  client.post<CleanupResult>("/api/v1/history/cleanup", signal);
+  client.postJson<CleanupResult, { confirm: "cleanup" }>(
+    "/api/v1/history/cleanup",
+    { confirm: "cleanup" },
+    signal,
+  );

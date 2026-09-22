@@ -80,13 +80,29 @@ def create_log_analysis_coordinator(
     return LogAnalysisCoordinator(repository, LogTools(WindowsEventLogProbe()))
 
 
+def _resolve_secret_service() -> SecretService:
+    """Fail closed when no real secret store is available.
+
+    FakeSecretService is only for explicit injection or the SYSMIND_FAKE_SECRETS=1
+    test escape hatch; production must never silently store provider keys in memory.
+    """
+    if os.name == "nt":
+        return WindowsCredentialSecretService()
+    if os.environ.get("SYSMIND_FAKE_SECRETS") == "1":
+        return FakeSecretService()
+    raise RuntimeError(
+        "No SecretService available on this platform. "
+        "Pass secrets= explicitly, or set SYSMIND_FAKE_SECRETS=1 for local tests only."
+    )
+
+
 def create_provider_settings_service(
     database_url: str,
     secrets: SecretService | None = None,
     sessions: sessionmaker[Session] | None = None,
 ) -> ProviderSettingsService:
     if secrets is None:
-        secrets = WindowsCredentialSecretService() if os.name == "nt" else FakeSecretService()
+        secrets = _resolve_secret_service()
     return ProviderSettingsService(
         SqlAlchemyProviderSettingsRepository(_resolve_sessions(database_url, sessions)),
         secrets,

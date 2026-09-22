@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from sysmind.domain.diagnosis import DiagnosisToolCall, EvidenceReference, Finding
+from sysmind.security.redaction import redact_structure
 
 _PATH = re.compile(r"^\$(?:(?:\.[A-Za-z_][A-Za-z0-9_]*)|(?:\[(?:0|[1-9]\d*)\]))*$")
 _TOKEN = re.compile(r"\.([A-Za-z_][A-Za-z0-9_]*)|\[(0|[1-9]\d*)\]")
@@ -86,8 +87,10 @@ class EvidenceComposer:
                 call_id,
                 by_id[call_id].tool_name,
                 by_id[call_id].tool_version,
-                key_fields,
-                by_id[call_id].summary or {},
+                # User-visible evidence payloads are redacted before they reach the
+                # markdown/JSON export surfaces; structure stays JSON-safe.
+                {path: redact_structure(item) for path, item in key_fields.items()},
+                redact_structure(by_id[call_id].summary or {}),  # type: ignore[arg-type]
                 by_id[call_id].finished_at or by_id[call_id].started_at,
             )
             for call_id, key_fields in grouped.items()

@@ -6,7 +6,15 @@ from typing import cast
 
 from pydantic import BaseModel, Field, field_validator
 
-from sysmind.domain.diagnosis import DiagnosisRecord, DiagnosisToolCall
+from sysmind.domain.diagnosis import (
+    DiagnosisCategory,
+    DiagnosisRecord,
+    DiagnosisStatus,
+    DiagnosisToolCall,
+    HypothesisStatus,
+    Severity,
+    StopReason,
+)
 from sysmind.reports.evidence import EvidenceComposer
 
 
@@ -51,7 +59,7 @@ class EvidenceDetailDto(BaseModel):
 class FindingDto(BaseModel):
     id: str
     code: str
-    severity: str
+    severity: Severity
     title: str
     explanation: str
     recommendation: str
@@ -70,13 +78,13 @@ class HypothesisDto(BaseModel):
     supporting_evidence_details: list[EvidenceDetailDto] = Field(default_factory=list)
     contradicting_evidence_details: list[EvidenceDetailDto] = Field(default_factory=list)
     confidence: float
-    status: str
+    status: HypothesisStatus
 
 
 class ReportDto(BaseModel):
     schema_version: str
     summary: str
-    category: str
+    category: DiagnosisCategory
     findings: list[FindingDto]
     confidence: float
     limitations: list[str]
@@ -105,16 +113,16 @@ class StructuredDiagnosisPlanDto(BaseModel):
 
 class DiagnosisResponse(BaseModel):
     id: str
-    status: str
+    status: DiagnosisStatus
     user_question: str
-    category: str
+    category: DiagnosisCategory
     provider: str
     plan: list[dict[str, object]]
     diagnosis_plan: StructuredDiagnosisPlanDto | None = None
     agent_round_count: int = 0
     max_agent_rounds: int = 4
     max_tool_calls: int = 8
-    stop_reason: str | None = None
+    stop_reason: StopReason | None = None
     user_inputs: list[str] = Field(default_factory=list)
     progress: int
     current_step: str | None
@@ -152,16 +160,24 @@ class DiagnosisResponse(BaseModel):
             composer = EvidenceComposer()
             report_data = cast(dict[str, object], data["report"])
             finding_data = cast(list[dict[str, object]], report_data["findings"])
-            # Both sequences come from the same report, but an explicit strict=False keeps
-            # a mismatch from ever raising out of a read-only DTO projection.
-            for item, finding in zip(finding_data, record.report.findings, strict=False):
+            # Pair by finding id (not zip) so a reordered or partial projection cannot
+            # silently drop evidence details via zip(strict=False).
+            findings_by_id = {finding.id: finding for finding in record.report.findings}
+            for item in finding_data:
+                finding = findings_by_id.get(cast(str, item.get("id", "")))
+                if finding is None:
+                    continue
                 item["evidence_details"] = [
                     asdict(evidence) for evidence in composer.compose(finding, calls)
                 ]
             hypothesis_data = cast(list[dict[str, object]], report_data["hypotheses"])
-            for item, hypothesis in zip(
-                hypothesis_data, record.report.hypotheses, strict=False
-            ):
+            hypotheses_by_id = {
+                hypothesis.id: hypothesis for hypothesis in record.report.hypotheses
+            }
+            for item in hypothesis_data:
+                hypothesis = hypotheses_by_id.get(cast(str, item.get("id", "")))
+                if hypothesis is None:
+                    continue
                 item["supporting_evidence_details"] = [
                     asdict(evidence)
                     for evidence in composer.compose_references(

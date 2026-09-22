@@ -21,10 +21,14 @@ class IssuedConsent:
 
 
 class ConsentService:
+    # Upper bound on any consent ticket lifetime so a caller cannot hand out a
+    # long-lived authorization by inflating ttl_seconds.
+    MAX_TTL_SECONDS = 300
+
     def __init__(self, session_binding: str, *, ttl_seconds: int = 120) -> None:
         self._key = secrets.token_bytes(32)
         self._session = hashlib.sha256(session_binding.encode()).hexdigest()
-        self._ttl = ttl_seconds
+        self._ttl = min(max(1, ttl_seconds), self.MAX_TTL_SECONDS)
 
     @property
     def ttl_seconds(self) -> int:
@@ -41,8 +45,9 @@ class ConsentService:
     ) -> IssuedConsent:
         now = datetime.now(UTC)
         # A shorter per-issue TTL keeps the advertised ticket expiry honest when the
-        # action plan itself has a tighter, action-specific window.
+        # action plan itself has a tighter, action-specific window. Always capped.
         effective_ttl = self._ttl if ttl_seconds is None else max(1, ttl_seconds)
+        effective_ttl = min(effective_ttl, self.MAX_TTL_SECONDS)
         expires = now + timedelta(seconds=effective_ttl)
         payload = {
             "action_id": action_id,

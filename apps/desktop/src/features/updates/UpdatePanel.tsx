@@ -54,7 +54,13 @@ export function UpdatePanel({
   async function install(update: AvailableUpdate) {
     setState({ kind: "installing", version: update.version });
     try {
-      await update.install();
+      const result = await update.install();
+      if (result?.relaunched === false) {
+        setState({
+          kind: "error",
+          message: "更新已安装成功，但应用未能自动重启。请手动重启应用以完成更新。",
+        });
+      }
     } catch {
       setState({
         kind: "error",

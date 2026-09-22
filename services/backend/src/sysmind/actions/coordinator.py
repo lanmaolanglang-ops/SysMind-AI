@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from sysmind.application.ports.actions import (
     ActionRepository,
+    ActionStateConflict,
     ActionVerificationError,
     ProcessActionAdapter,
     StartupActionAdapter,
@@ -18,6 +19,7 @@ from sysmind.domain.actions import (
     RESTORE_STARTUP_TOOL,
     TERMINATE_PROCESS_TOOL,
     ActionRecord,
+    ActionStatus,
     ProcessActionCandidate,
     StartupActionCandidate,
     action_tool_version,
@@ -72,21 +74,73 @@ class ActionCoordinator:
         if diagnosis is None or diagnosis.status not in {"completed", "partial"}:
             raise ActionError("diagnosis_not_ready", "A completed diagnosis is required.")
         calls = self._diagnoses.tool_calls(diagnosis_id)
-        if not any(
-            call.status == "completed" and call.tool_name in {"startup.list", "startup.analyze"}
+        startup_calls = tuple(
+            call
             for call in calls
-        ):
+            if call.status == "completed" and call.tool_name in {"startup.list", "startup.analyze"}
+        )
+        if not startup_calls:
             raise ActionError(
                 "startup_evidence_required",
                 "This diagnosis contains no completed startup evidence.",
             )
-        return tuple(self._adapter.candidates())
+        adapter_candidates = tuple(self._adapter.candidates())
+        evidence_ids = self._startup_evidence_ids(diagnosis.report, startup_calls)
+        if not evidence_ids:
+            raise ActionError(
+                "startup_evidence_required",
+                "Referenced startup evidence did not contain bound target identities.",
+            )
+        return tuple(item for item in adapter_candidates if item.item_id in evidence_ids)
+
+    @staticmethod
+    def _startup_evidence_ids(
+        report: object,
+        startup_calls: tuple[object, ...],
+    ) -> set[str]:
+        referenced = ActionCoordinator._referenced_call_ids(report)
+        evidence_ids: set[str] = set()
+        for call in startup_calls:
+            call_id = getattr(call, "id", None)
+            result = getattr(call, "result", None)
+            if call_id not in referenced:
+                continue
+            items: list[object] = []
+            if isinstance(result, list):
+                items = result
+            elif isinstance(result, dict):
+                nested = result.get("items")
+                if isinstance(nested, list):
+                    items = nested
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_id = item.get("item_id")
+                if isinstance(item_id, str) and item_id:
+                    evidence_ids.add(item_id)
+        return evidence_ids
+
+    @staticmethod
+    def _referenced_call_ids(report: object) -> set[str]:
+        referenced: set[str] = set()
+        findings = getattr(report, "findings", ()) if report is not None else ()
+        hypotheses = getattr(report, "hypotheses", ()) if report is not None else ()
+        for finding in findings:
+            for evidence in finding.evidence:
+                referenced.add(evidence.tool_call_id)
+        for hypothesis in hypotheses:
+            for evidence in hypothesis.supporting_evidence:
+                referenced.add(evidence.tool_call_id)
+            for evidence in hypothesis.contradicting_evidence:
+                referenced.add(evidence.tool_call_id)
+        return referenced
 
     def create_disable(
         self, diagnosis_id: str, item_id: str, observed_revision: str
     ) -> ActionRecord:
         target = next(
-            (item for item in self.candidates(diagnosis_id) if item.item_id == item_id), None
+            (item for item in self.candidates(diagnosis_id) if item.item_id == item_id),
+            None,
         )
         if target is None or target.observed_revision != observed_revision:
             raise ActionError("target_changed", "Startup target changed; refresh the plan.")
@@ -111,26 +165,24 @@ class ActionCoordinator:
             for call in self._diagnoses.tool_calls(diagnosis_id)
             if call.status == "completed" and call.tool_name == "process.high_usage"
         )
-        referenced_call_ids = {
-            evidence.tool_call_id
-            for finding in (diagnosis.report.findings if diagnosis.report else ())
-            for evidence in finding.evidence
-        }
-        evidence_pids = {
-            int(item["pid"])
-            for call in calls
-            if call.id in referenced_call_ids and isinstance(call.result, list)
-            for item in call.result
-            if isinstance(item, dict) and isinstance(item.get("pid"), int)
-        }
-        if not evidence_pids:
+        referenced_call_ids = self._referenced_call_ids(diagnosis.report)
+        evidence_item_ids: set[str] = set()
+        for call in calls:
+            if call.id not in referenced_call_ids or not isinstance(call.result, list):
+                continue
+            for item in call.result:
+                if not isinstance(item, dict):
+                    continue
+                item_id = item.get("item_id")
+                if isinstance(item_id, str) and item_id:
+                    evidence_item_ids.add(item_id)
+        if not evidence_item_ids:
             raise ActionError(
                 "process_evidence_required",
-                "This diagnosis contains no referenced high-usage process evidence.",
+                "Referenced process evidence did not contain bound target identities.",
             )
-        return tuple(
-            item for item in self._process_adapter.candidates() if item.pid in evidence_pids
-        )
+        candidates = tuple(self._process_adapter.candidates())
+        return tuple(item for item in candidates if item.item_id in evidence_item_ids)
 
     def create_process_close(
         self, diagnosis_id: str, item_id: str, observed_revision: str
@@ -171,7 +223,9 @@ class ActionCoordinator:
             ),
             None,
         )
-        if target is None:
+        # Fail closed when the process instance is gone or its observed identity
+        # (including create-time / image / handle set) no longer matches the close plan.
+        if target is None or target.observed_revision != original.observed_revision:
             raise ActionError("target_changed", "Process is no longer an eligible target.")
         return self._repository.create(
             plan_id=str(uuid.uuid4()),
@@ -207,7 +261,10 @@ class ActionCoordinator:
             now = _now()
             self._repository.add_confirmation_stage(action.id, stage=1, created_at=now)
             action = self._repository.set_status(
-                action.id, status="awaiting_second_confirmation", updated_at=now
+                action.id,
+                expected_statuses=("proposed",),
+                status="awaiting_second_confirmation",
+                updated_at=now,
             )
             return action, None, None
         if (
@@ -215,10 +272,20 @@ class ActionCoordinator:
             and action.status == "awaiting_second_confirmation"
             and self._age_seconds(action) > PROCESS_PLAN_WINDOW_SECONDS
         ):
-            self._repository.set_status(action.id, status="expired", updated_at=_now())
+            self._repository.set_status(
+                action.id,
+                expected_statuses=("awaiting_second_confirmation",),
+                status="expired",
+                updated_at=_now(),
+            )
             raise ActionError("action_expired", "Termination confirmation window expired.")
         if action.status not in {"proposed", "awaiting_second_confirmation"}:
             raise ActionError("invalid_action_state", "Only a proposed action can be confirmed.")
+        if action.tool_name == TERMINATE_PROCESS_TOOL and (
+            action.status == "awaiting_second_confirmation"
+        ):
+            # Second explicit confirmation for forced termination (audit trail).
+            self._repository.add_confirmation_stage(action.id, stage=2, created_at=_now())
         # Process actions also have a bounded execution window; cap the ticket lifetime to
         # whatever remains so the issued expiry matches when the plan can actually run.
         ttl_seconds: int | None = None
@@ -235,7 +302,17 @@ class ActionCoordinator:
         self._repository.add_confirmation(
             action.id, ticket_digest=issued.digest, expires_at=issued.expires_at, created_at=_now()
         )
-        action = self._repository.set_status(action.id, status="confirmed", updated_at=_now())
+        try:
+            action = self._repository.set_status(
+                action.id,
+                expected_statuses=("proposed", "awaiting_second_confirmation"),
+                status="confirmed",
+                updated_at=_now(),
+            )
+        except ActionStateConflict as error:
+            raise ActionError(
+                "invalid_action_state", "Action state changed concurrently."
+            ) from error
         return action, issued.ticket, issued.expires_at
 
     def reject(self, action_id: str) -> ActionRecord:
@@ -244,7 +321,17 @@ class ActionCoordinator:
             raise ActionError("invalid_action_state", "Only a proposed action can be rejected.")
         now = _now()
         self._repository.add_rejection(action.id, created_at=now)
-        return self._repository.set_status(action.id, status="rejected", updated_at=now)
+        try:
+            return self._repository.set_status(
+                action.id,
+                expected_statuses=("proposed", "awaiting_second_confirmation"),
+                status="rejected",
+                updated_at=now,
+            )
+        except ActionStateConflict as error:
+            raise ActionError(
+                "invalid_action_state", "Action state changed concurrently."
+            ) from error
 
     def execute(self, action_id: str, ticket: str) -> ActionRecord:
         with self._lock:
@@ -263,7 +350,13 @@ class ActionCoordinator:
                 raise ActionError(
                     "consent_replayed_or_expired", "Consent was already used or expired."
                 )
-            self._repository.set_status(action.id, status="executing", updated_at=_now())
+            self._repository.set_status(
+                action.id,
+                expected_statuses=("confirmed",),
+                status="executing",
+                updated_at=_now(),
+            )
+            persisted_status: ActionStatus = "executing"
             try:
                 if action.tool_name == DISABLE_STARTUP_TOOL:
                     result = self._adapter.disable(action.target_id, action.observed_revision)
@@ -297,23 +390,35 @@ class ActionCoordinator:
                     )
                 else:
                     raise ToolUnavailableError("Action tool is not registered.")
-                self._repository.set_status(action.id, status="verifying", updated_at=_now())
+                self._repository.set_status(
+                    action.id,
+                    expected_statuses=("executing",),
+                    status="verifying",
+                    updated_at=_now(),
+                )
+                persisted_status = "verifying"
                 if action.tool_name == RESTORE_STARTUP_TOOL:
                     self._repository.consume_recovery(action.target_id, consumed_at=_now())
                 if result.outcome == "close_pending":
                     return self._repository.set_status(
                         action.id,
+                        expected_statuses=("verifying",),
                         status="close_pending",
                         updated_at=_now(),
                         error_code="close_pending",
                         error_message="The application did not close within the bounded wait.",
                     )
                 return self._repository.set_status(
-                    action.id, status="succeeded", updated_at=_now(), recovery_id=result.recovery_id
+                    action.id,
+                    expected_statuses=("verifying",),
+                    status="succeeded",
+                    updated_at=_now(),
+                    recovery_id=result.recovery_id,
                 )
             except ActionVerificationError as error:
                 return self._repository.set_status(
                     action.id,
+                    expected_statuses=(persisted_status,),
                     status="verification_failed",
                     updated_at=_now(),
                     recovery_id=error.recovery_id,
@@ -323,6 +428,7 @@ class ActionCoordinator:
             except TargetChangedError as error:
                 return self._repository.set_status(
                     action.id,
+                    expected_statuses=(persisted_status,),
                     status="target_changed",
                     updated_at=_now(),
                     error_code="target_changed",
@@ -331,6 +437,7 @@ class ActionCoordinator:
             except ToolPermissionError as error:
                 return self._repository.set_status(
                     action.id,
+                    expected_statuses=(persisted_status,),
                     status="failed",
                     updated_at=_now(),
                     error_code="permission_required",
@@ -339,6 +446,7 @@ class ActionCoordinator:
             except ToolUnavailableError as error:
                 return self._repository.set_status(
                     action.id,
+                    expected_statuses=(persisted_status,),
                     status="verification_failed",
                     updated_at=_now(),
                     error_code="verification_failed",
@@ -347,6 +455,7 @@ class ActionCoordinator:
             except OSError:
                 return self._repository.set_status(
                     action.id,
+                    expected_statuses=(persisted_status,),
                     status="failed",
                     updated_at=_now(),
                     error_code="bounded_os_error",
@@ -357,6 +466,7 @@ class ActionCoordinator:
                 # terminal state instead of staying "executing" until the next restart.
                 return self._repository.set_status(
                     action.id,
+                    expected_statuses=(persisted_status,),
                     status="failed",
                     updated_at=_now(),
                     error_code="action_failed",

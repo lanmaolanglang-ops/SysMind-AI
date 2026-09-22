@@ -12,17 +12,26 @@ from sysmind.application.ports.scans import ScanRepository
 from sysmind.domain.diagnostics import ScanRecord, ScanStatus, StepStatus
 from sysmind.infrastructure.database.models import ScanStepEvent, SystemScan
 
+_TERMINAL_STATUSES = frozenset({"completed", "partial", "cancelled", "failed"})
+_NON_TERMINAL_STATUSES = frozenset({"queued", "running"})
+
 
 def _parse_time(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+def _loads(raw: str | None, default: object) -> object:
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 def _to_record(model: SystemScan) -> ScanRecord:
-    summary = cast(
-        dict[str, object] | None,
-        json.loads(model.summary_json) if model.summary_json else None,
-    )
-    failures = tuple(cast(list[dict[str, str]], json.loads(model.failures_json)))
+    summary = cast(dict[str, object] | None, _loads(model.summary_json, None))
+    failures = cast(list[dict[str, str]], _loads(model.failures_json, []))
     return ScanRecord(
         id=model.id,
         status=cast(ScanStatus, model.status),
@@ -31,7 +40,7 @@ def _to_record(model: SystemScan) -> ScanRecord:
         started_at=model.started_at.isoformat(),
         finished_at=model.finished_at.isoformat() if model.finished_at else None,
         summary=summary,
-        failures=failures,
+        failures=tuple(failures),
         schema_version=model.schema_version,
     )
 
@@ -69,6 +78,10 @@ class SqlAlchemyScanRepository(ScanRepository):
             model = session.get(SystemScan, scan_id)
             if model is None:
                 raise KeyError(scan_id)
+            # Optimistic guard: never revive a terminal row with a non-terminal status
+            # (e.g. a late "running" write after cancel already finalized the scan).
+            if model.status in _TERMINAL_STATUSES and status in _NON_TERMINAL_STATUSES:
+                return _to_record(model)
             model.status = status
             model.progress = progress
             model.current_step = current_step
@@ -130,7 +143,7 @@ class SqlAlchemyScanRepository(ScanRepository):
             statement = select(SystemScan).where(SystemScan.status.in_(("queued", "running")))
             models = list(session.scalars(statement))
             for model in models:
-                failures = json.loads(model.failures_json)
+                failures = cast(list[dict[str, str]], _loads(model.failures_json, []))
                 failures.append(
                     {
                         "tool": model.current_step or "scan",

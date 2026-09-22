@@ -6,6 +6,7 @@ from typing import Protocol
 from sysmind.domain.actions import (
     ActionCandidate,
     ActionRecord,
+    ActionStatus,
     MutationResult,
     ProcessActionCandidate,
     StartupActionCandidate,
@@ -22,6 +23,10 @@ class ActionVerificationError(RuntimeError):
     def __init__(self, message: str, *, recovery_id: str | None = None) -> None:
         super().__init__(message)
         self.recovery_id = recovery_id
+
+
+class ActionStateConflict(RuntimeError):
+    """The persisted action no longer has the expected source state."""
 
 
 class StartupActionAdapter(Protocol):
@@ -58,7 +63,8 @@ class ActionRepository(Protocol):
         self,
         action_id: str,
         *,
-        status: str,
+        expected_statuses: Sequence[ActionStatus],
+        status: ActionStatus,
         updated_at: str,
         recovery_id: str | None = None,
         error_code: str | None = None,

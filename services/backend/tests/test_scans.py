@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -244,12 +243,13 @@ def test_startup_marks_orphaned_scan_as_failed(
 
 
 @pytest.mark.anyio
-async def test_recently_interrupted_scan_is_replayed(settings: Settings) -> None:
+async def test_startup_marks_interrupted_scan_without_replay(settings: Settings) -> None:
+    """Interrupted scans must terminate (PRD/ADR), not silently re-run."""
     run_migrations(settings.database_url)
     repository = SqlAlchemyScanRepository(create_session_factory(settings.database_url))
-    repository.create("replayed-scan", datetime.now(UTC).isoformat(), "1.0")
+    repository.create("interrupted-scan", datetime.now(UTC).isoformat(), "1.0")
     repository.update(
-        "replayed-scan", status="running", progress=10, current_step="system.gpu"
+        "interrupted-scan", status="running", progress=10, current_step="system.gpu"
     )
     coordinator = QuickScanCoordinator(
         repository,
@@ -259,14 +259,9 @@ async def test_recently_interrupted_scan_is_replayed(settings: Settings) -> None
 
     assert coordinator.recover_interrupted() == 1
 
-    record: object = None
-    for _ in range(200):
-        record = repository.get("replayed-scan")
-        if record is not None and record.status in {"completed", "partial"}:
-            break
-        await asyncio.sleep(0.05)
-    else:
-        raise AssertionError("the interrupted scan was not replayed")
-
+    record = repository.get("interrupted-scan")
     assert record is not None
-    assert record.status in {"completed", "partial"}
+    assert record.status == "failed"
+    assert any(failure.get("code") == "backend_restarted" for failure in record.failures)
+    # Must not restart collection in the background.
+    assert coordinator._tasks == {}  # noqa: SLF001

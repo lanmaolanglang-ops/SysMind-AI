@@ -8,7 +8,8 @@ from sysmind.agent.providers.openai_compatible import (
     OpenAICompatibleProvider,
 )
 
-DEFAULT_TIMEOUT_SECONDS = 5.0
+# Match OpenAICompatibleConfig's production default; 5s is too short for real LLM calls.
+DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
 class OpenAICompatibleProviderFactory:

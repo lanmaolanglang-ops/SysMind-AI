@@ -7,6 +7,7 @@ from sysmind.domain.diagnosis import (
     DiagnosisHypothesis,
     DiagnosisRecord,
     DiagnosisReport,
+    DiagnosisStatus,
     DiagnosisToolCall,
     StopReason,
 )
@@ -26,7 +27,7 @@ class DiagnosisRepository(Protocol):
     def get(self, diagnosis_id: str) -> DiagnosisRecord | None: ...
     def recent(self, limit: int = 20) -> list[DiagnosisRecord]: ...
     def update_progress(
-        self, diagnosis_id: str, *, status: str, progress: int, current_step: str | None
+        self, diagnosis_id: str, *, status: DiagnosisStatus, progress: int, current_step: str | None
     ) -> None: ...
     def save_agent_plan(
         self,
@@ -36,7 +37,13 @@ class DiagnosisRepository(Protocol):
         plan: dict[str, object],
         revision: int,
         created_at: str,
-    ) -> tuple[str, tuple[str, ...]]: ...
+    ) -> tuple[str, tuple[str, ...]]:
+        """Persist one planner revision and its steps.
+
+        Returns ``(plan_id, step_ids)``: the id of the new plan row, and the created
+        step ids in plan order (parallel to ``plan["steps"]``).
+        """
+        ...
     def finish_diagnosis_step(
         self, step_id: str, *, status: str, tool_call_id: str | None
     ) -> None: ...
@@ -68,20 +75,26 @@ class DiagnosisRepository(Protocol):
         *,
         reason: StopReason,
         detail: str,
-        terminal_status: str,
+        terminal_status: DiagnosisStatus,
         created_at: str,
     ) -> None: ...
     def complete(
         self,
         diagnosis_id: str,
         *,
-        status: str,
+        status: DiagnosisStatus,
         report: DiagnosisReport,
         markdown: str,
         completed_at: str,
     ) -> DiagnosisRecord: ...
     def fail(
-        self, diagnosis_id: str, *, status: str, code: str, message: str, completed_at: str
+        self,
+        diagnosis_id: str,
+        *,
+        status: DiagnosisStatus,
+        code: str,
+        message: str,
+        completed_at: str,
     ) -> DiagnosisRecord: ...
     def create_tool_call(
         self,

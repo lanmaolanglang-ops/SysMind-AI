@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Final, Literal, TypeAlias
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +32,9 @@ class CpuInfo:
 GPU_TELEMETRY_UNAVAILABLE = "Real-time GPU utilization is unavailable."
 # WDDM counters expose a per-adapter LUID, and Win32_VideoController does not, so the
 # readings cannot be attributed to a named adapter on multi-GPU systems.
-GPU_TELEMETRY_SYSTEM_SCOPE = "system"
-GPU_TELEMETRY_ADAPTER_SCOPE = "adapter"
+GpuTelemetryScope: TypeAlias = Literal["system", "adapter"]
+GPU_TELEMETRY_SYSTEM_SCOPE: Final[GpuTelemetryScope] = "system"
+GPU_TELEMETRY_ADAPTER_SCOPE: Final[GpuTelemetryScope] = "adapter"
 GPU_TELEMETRY_UNAVAILABLE_OTHERS = (
     "GPU telemetry is reported at system level and attached to the first adapter."
 )
@@ -48,7 +49,7 @@ class GpuInfo:
     utilization_percent: float | None = None
     memory_used_bytes: int | None = None
     telemetry_limitation: str | None = None
-    telemetry_scope: str = GPU_TELEMETRY_ADAPTER_SCOPE
+    telemetry_scope: GpuTelemetryScope = GPU_TELEMETRY_ADAPTER_SCOPE
 
     def __post_init__(self) -> None:
         if self.telemetry_available:
@@ -87,6 +88,7 @@ class ProcessInfo:
     cpu_percent: float
     memory_bytes: int
     memory_percent: float
+    item_id: str | None = None
 
 
 ScanStatus = Literal["queued", "running", "completed", "partial", "cancelled", "failed"]
@@ -106,6 +108,8 @@ class ScanRecord:
     schema_version: str
 
     def __post_init__(self) -> None:
+        if not 0 <= self.progress <= 100:
+            raise ValueError(f"progress must be between 0 and 100, got {self.progress}.")
         # `frozen=True` blocks attribute rebinding but not mutation of the containers, so
         # the mapping is copied to stop an external reference from mutating the record.
         if self.summary is not None:

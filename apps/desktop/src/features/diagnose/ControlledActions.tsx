@@ -151,7 +151,9 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
     void confirmAndExecute(client, executingAction)
       .then((result) => {
         setAction(result);
-        if (result.tool_name === "startup.disable_current_user" && result.status === "succeeded") {
+        // Recovery must stay reachable for verification_failed as well as succeeded;
+        // both retain recovery material on the server.
+        if (result.tool_name === "startup.disable_current_user" && result.recovery_available) {
           setOriginal(result);
         }
       })
@@ -169,9 +171,14 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   };
 
   const prepareRecovery = () => {
-    if (!original) return;
+    // Prefer the captured original action; fall back to the current action so recovery
+    // still works after reconcile/checkStatus when only action state is known.
+    const sourceId =
+      original?.id ??
+      (action?.tool_name === "startup.disable_current_user" ? action.id : null);
+    if (!sourceId) return;
     setBusy(true);
-    void createRecoveryAction(client, original.id)
+    void createRecoveryAction(client, sourceId)
       .then((result) => { setAction(result); setMessage(null); })
       .catch(() => setMessage("恢复资料不可用或目标位置已被占用。"))
       .finally(() => setBusy(false));

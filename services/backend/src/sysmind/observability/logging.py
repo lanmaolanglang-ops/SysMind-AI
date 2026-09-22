@@ -67,8 +67,12 @@ class JsonFormatter(logging.Formatter):
             payload["context"] = _sanitize(context)
         if record.exc_info:
             # Tracebacks embed absolute file paths (with the account name) and the
-            # exception text, both of which may contain PII.
-            payload["exception"] = redact_text(self.formatException(record.exc_info))
+            # exception text, both of which may contain PII. Clamp length so a huge
+            # stack cannot flood the log stream (paths themselves are redacted below).
+            payload["exception"] = redact_text(self.formatException(record.exc_info))[:4000]
+        # default=str coerces non-JSON values through str(), which can leak object
+        # reprs (paths, custom types carrying secrets) into the log stream. Prefer
+        # JSON-safe context values at the call site.
         return json.dumps(_sanitize(payload), ensure_ascii=False, default=str)
 
 
@@ -91,6 +95,14 @@ def log_event(
     correlation_id: str | None = None,
     **context: Any,
 ) -> None:
+    # Filter reserved LogRecord keys on the write side so caller-supplied context
+    # cannot collide with (or attempt to override) msg/args/levelname and friends.
+    safe_context = {
+        key: value
+        for key, value in _sanitize(context).items()
+        if key not in _RESERVED_LOG_KEYS
+        and key not in {"component", "event_type", "correlation_id"}
+    }
     logger.log(
         level,
         message,
@@ -100,7 +112,7 @@ def log_event(
             # Correlation IDs come from an external header; clamp them so a hostile
             # value cannot inject arbitrarily long content into the JSON log stream.
             "correlation_id": _clamp_text(correlation_id),
-            **_sanitize(context),
+            **safe_context,
         },
     )
 

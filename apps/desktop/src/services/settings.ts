@@ -16,16 +16,18 @@ export function getProviderSettings(client: ApiClient, signal?: AbortSignal) {
 export function saveProviderSettings(
   client: ApiClient,
   value: { provider: string; model: string; endpoint: string; api_key?: string },
+  signal?: AbortSignal,
 ) {
-  return client.putJson<ProviderSettings, typeof value>("/api/v1/settings", value);
+  return client.putJson<ProviderSettings, typeof value>("/api/v1/settings", value, signal);
 }
 
-export function testProvider(client: ApiClient) {
+export function testProvider(client: ApiClient, signal?: AbortSignal) {
   return client.post<{ succeeded: boolean; error_code: string | null; duration_ms: number }>(
     "/api/v1/providers/test",
+    signal,
   );
 }
 
-export function clearProviderCredential(client: ApiClient) {
-  return client.delete<ProviderSettings>("/api/v1/settings/credential");
+export function clearProviderCredential(client: ApiClient, signal?: AbortSignal) {
+  return client.delete<ProviderSettings>("/api/v1/settings/credential", signal);
 }

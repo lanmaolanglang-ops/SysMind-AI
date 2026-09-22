@@ -99,8 +99,16 @@ export interface Diagnosis {
   }>;
 }
 
-export function startDiagnosis(client: ApiClient, question: string): Promise<Diagnosis> {
-  return client.postJson<Diagnosis, { question: string }>("/api/v1/diagnoses", { question });
+export function startDiagnosis(
+  client: ApiClient,
+  question: string,
+  signal?: AbortSignal,
+): Promise<Diagnosis> {
+  return client.postJson<Diagnosis, { question: string }>(
+    "/api/v1/diagnoses",
+    { question },
+    signal,
+  );
 }
 
 export function getDiagnosis(client: ApiClient, id: string, signal?: AbortSignal) {
@@ -111,20 +119,33 @@ export function recentDiagnoses(client: ApiClient, signal?: AbortSignal) {
   return client.get<{ items: Diagnosis[] }>("/api/v1/diagnoses", signal);
 }
 
-export function cancelDiagnosis(client: ApiClient, id: string) {
-  return client.post<Diagnosis>(`/api/v1/diagnoses/${id}/cancel`);
+export function cancelDiagnosis(client: ApiClient, id: string, signal?: AbortSignal) {
+  return client.post<Diagnosis>(`/api/v1/diagnoses/${id}/cancel`, signal);
 }
 
-export function continueDiagnosis(client: ApiClient, id: string, answer: string) {
-  return client.postJson<Diagnosis, { answer: string }>(`/api/v1/diagnoses/${id}/inputs`, {
-    answer,
-  });
+export function continueDiagnosis(
+  client: ApiClient,
+  id: string,
+  answer: string,
+  signal?: AbortSignal,
+) {
+  return client.postJson<Diagnosis, { answer: string }>(
+    `/api/v1/diagnoses/${id}/inputs`,
+    { answer },
+    signal,
+  );
 }
 
-export function submitDiagnosisFeedback(client: ApiClient, id: string, helpful: boolean) {
+export function submitDiagnosisFeedback(
+  client: ApiClient,
+  id: string,
+  helpful: boolean,
+  signal?: AbortSignal,
+) {
   return client.postJson<{ accepted: boolean }, { helpful: boolean }>(
     `/api/v1/diagnoses/${id}/feedback`,
     { helpful },
+    signal,
   );
 }
 

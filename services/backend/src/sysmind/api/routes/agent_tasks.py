@@ -8,6 +8,7 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from sysmind.api.dto.agent_tasks import (
     AgentTaskListResponse,
@@ -36,19 +37,21 @@ def _manager(request: Request) -> AgentTaskManager:
     return cast(AgentTaskManager, request.app.state.agent_task_manager)
 
 
-def _response(manager: AgentTaskManager, task_id: str) -> AgentTaskResponse:
-    record = manager.get(task_id)
-    if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    return AgentTaskResponse.from_record(record, manager.tool_calls(task_id))
+async def _response(manager: AgentTaskManager, task_id: str) -> AgentTaskResponse:
+    def _build() -> AgentTaskResponse:
+        record = manager.get(task_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+        return AgentTaskResponse.from_record(record, manager.tool_calls(task_id))
+
+    return await run_in_threadpool(_build)
 
 
 @router.get("/tools", response_model=ToolCatalogResponse)
 async def available_tools(request: Request) -> ToolCatalogResponse:
+    items = await run_in_threadpool(_manager(request).available_tools)
     return ToolCatalogResponse(
-        items=[
-            ToolDescriptorDto.from_descriptor(item) for item in _manager(request).available_tools()
-        ]
+        items=[ToolDescriptorDto.from_descriptor(item) for item in items]
     )
 
 
@@ -60,6 +63,7 @@ async def start_agent_task(
 ) -> AgentTaskResponse:
     manager = _manager(request)
     try:
+        # Manager.start schedules asyncio tasks and must run on the event loop.
         record = manager.start(
             user_goal=payload.user_goal,
             allowed_tools=tuple(payload.allowed_tools),
@@ -76,23 +80,28 @@ async def start_agent_task(
 @router.get("", response_model=AgentTaskListResponse)
 async def recent_agent_tasks(request: Request) -> AgentTaskListResponse:
     manager = _manager(request)
+    records = await run_in_threadpool(manager.recent)
     return AgentTaskListResponse(
-        items=[AgentTaskResponse.from_record(record) for record in manager.recent()]
+        items=[AgentTaskResponse.from_record(record) for record in records]
     )
 
 
 @router.get("/{task_id}", response_model=AgentTaskResponse)
 async def get_agent_task(task_id: str, request: Request) -> AgentTaskResponse:
-    return _response(_manager(request), task_id)
+    return await _response(_manager(request), task_id)
 
 
 @router.post("/{task_id}/cancel", response_model=AgentTaskResponse)
 async def cancel_agent_task(task_id: str, request: Request) -> AgentTaskResponse:
     manager = _manager(request)
-    record = manager.cancel(task_id)
-    if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
-    return AgentTaskResponse.from_record(record, manager.tool_calls(task_id))
+
+    def _cancel() -> AgentTaskResponse:
+        record = manager.cancel(task_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+        return AgentTaskResponse.from_record(record, manager.tool_calls(task_id))
+
+    return await run_in_threadpool(_cancel)
 
 
 @router.get("/{task_id}/events")
@@ -103,7 +112,7 @@ async def stream_agent_task_events(
     after: Annotated[int, Query(ge=0)] = 0,
 ) -> StreamingResponse:
     manager = _manager(request)
-    if manager.get(task_id) is None:
+    if await run_in_threadpool(manager.get, task_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
     try:
         cursor = int(last_event_id) if last_event_id is not None else after
@@ -115,9 +124,24 @@ async def stream_agent_task_events(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid event cursor.")
 
     def _render(event: AgentTaskEvent) -> str:
-        payload = json.dumps(
-            {**event.data, "created_at": event.created_at}, ensure_ascii=False
-        )
+        try:
+            payload = json.dumps(
+                {**event.data, "created_at": event.created_at},
+                ensure_ascii=False,
+                default=str,
+            )
+        except TypeError:
+            # A non-serializable payload must not drop the stream; emit an error event.
+            payload = json.dumps(
+                {
+                    "error": {
+                        "code": "event_render_failed",
+                        "message": "Task event payload could not be serialized.",
+                    }
+                },
+                ensure_ascii=False,
+            )
+            return f"id: {event.id}\nevent: error\ndata: {payload}\n\n"
         return f"id: {event.id}\nevent: {event.event_type}\ndata: {payload}\n\n"
 
     async def event_stream() -> AsyncIterator[str]:

@@ -1,19 +1,24 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psutil
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 
 from sysmind.actions import ActionError
+from sysmind.actions.coordinator import PROCESS_PLAN_WINDOW_SECONDS
 from sysmind.api.dto.actions import ActionResponse
+from sysmind.application.ports.actions import ActionStateConflict
 from sysmind.domain.actions import (
     StartupActionCandidate,
 )
 from sysmind.infrastructure.database import create_session_factory
-from sysmind.infrastructure.database.models import ActionModel
+from sysmind.infrastructure.database.models import ActionModel, DiagnosisToolCallModel
+from sysmind.infrastructure.database.repositories import SqlAlchemyActionRepository
 from sysmind.tools.contracts import ToolUnavailableError
 from sysmind.windows.process_actions import WindowsProcessActionAdapter
 from tests.fakes.actions import FakeProcessActions, coordinator
@@ -62,6 +67,28 @@ def test_target_revision_change_fails_closed(tmp_path: Path) -> None:
     assert result.status == "target_changed"
 
 
+def test_action_repository_rejects_stale_status_transition(tmp_path: Path) -> None:
+    service, _adapter = coordinator(tmp_path)
+    candidate = service.candidates("diagnosis-ready")[0]
+    action = service.create_disable(
+        "diagnosis-ready", candidate.item_id, candidate.observed_revision
+    )
+    repository = SqlAlchemyActionRepository(
+        create_session_factory(f"sqlite:///{(tmp_path / 'actions.db').as_posix()}")
+    )
+
+    with pytest.raises(ActionStateConflict):
+        repository.set_status(
+            action.id,
+            expected_statuses=("confirmed",),
+            status="executing",
+            updated_at=datetime.now(UTC).isoformat(),
+        )
+
+    persisted = repository.get(action.id)
+    assert persisted is not None and persisted.status == "proposed"
+
+
 def test_disable_verification_failure_keeps_recovery_chain(tmp_path: Path) -> None:
     service, adapter = coordinator(tmp_path)
     adapter.fail_verification = True
@@ -89,6 +116,40 @@ def test_diagnosis_without_startup_evidence_is_rejected(tmp_path: Path) -> None:
     service, _adapter = coordinator(tmp_path)
     with pytest.raises(ActionError, match="completed diagnosis"):
         service.candidates("missing")
+
+
+def test_startup_candidates_fail_closed_when_legacy_evidence_has_no_item_id(
+    tmp_path: Path,
+) -> None:
+    service, _adapter = coordinator(tmp_path)
+    sessions = create_session_factory(f"sqlite:///{(tmp_path / 'actions.db').as_posix()}")
+    with sessions.begin() as session:
+        session.execute(
+            update(DiagnosisToolCallModel)
+            .where(DiagnosisToolCallModel.id == "startup-call")
+            .values(result_json=json.dumps({"items": [{"name": "Example"}]}))
+        )
+
+    with pytest.raises(ActionError) as error:
+        service.candidates("diagnosis-ready")
+    assert error.value.code == "startup_evidence_required"
+
+
+def test_process_candidates_fail_closed_when_evidence_only_contains_pid(
+    tmp_path: Path,
+) -> None:
+    service, _adapter = coordinator(tmp_path, FakeProcessActions())
+    sessions = create_session_factory(f"sqlite:///{(tmp_path / 'actions.db').as_posix()}")
+    with sessions.begin() as session:
+        session.execute(
+            update(DiagnosisToolCallModel)
+            .where(DiagnosisToolCallModel.id == "process-call")
+            .values(result_json=json.dumps([{"pid": 4242, "name": "Editor.exe"}]))
+        )
+
+    with pytest.raises(ActionError) as error:
+        service.process_candidates("diagnosis-ready")
+    assert error.value.code == "process_evidence_required"
 
 
 @pytest.mark.parametrize(
@@ -125,7 +186,7 @@ def test_process_close_plan_expires_before_execution(tmp_path: Path) -> None:
     with sessions.begin() as session:
         model = session.get(ActionModel, action.id)
         assert model is not None
-        model.created_at = datetime.now(UTC) - timedelta(seconds=31)
+        model.created_at = datetime.now(UTC) - timedelta(seconds=PROCESS_PLAN_WINDOW_SECONDS + 1)
 
     result = service.execute(action.id, ticket)
     assert result.status == "target_changed"
@@ -215,7 +276,7 @@ def test_second_termination_confirmation_expires_with_plan(tmp_path: Path) -> No
     with sessions.begin() as session:
         model = session.get(ActionModel, termination.id)
         assert model is not None
-        model.created_at = datetime.now(UTC) - timedelta(seconds=31)
+        model.created_at = datetime.now(UTC) - timedelta(seconds=PROCESS_PLAN_WINDOW_SECONDS + 1)
 
     with pytest.raises(ActionError) as error:
         service.confirm(stage_one.id)

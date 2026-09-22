@@ -111,6 +111,9 @@ def test_process_snapshot_primes_all_processes_before_reading(
         def memory_percent(self) -> float:
             return 1.0
 
+        def create_time(self) -> float:
+            return 100.0
+
         def name(self) -> str:
             return "busy.exe"
 
@@ -121,6 +124,7 @@ def test_process_snapshot_primes_all_processes_before_reading(
 
     assert len(calls) == 2
     assert result[0].cpu_percent == 40.0
+    assert result[0].item_id is not None
 
 
 @pytest.mark.windows_smoke

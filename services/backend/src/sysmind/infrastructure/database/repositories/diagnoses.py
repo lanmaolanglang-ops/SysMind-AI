@@ -41,6 +41,24 @@ from sysmind.tools.executor import arguments_hash
 # version suffix we fall back to the baseline version instead of failing the whole plan.
 DEFAULT_TOOL_VERSION = "1.0"
 
+_TERMINAL_STATUSES = frozenset(
+    {"completed", "partial", "cancelled", "failed", "interrupted"}
+)
+# A step that already reached one of these states must not be rewritten by a late finish.
+_TERMINAL_STEP_STATUSES = frozenset(
+    {"completed", "failed", "cancelled", "timed_out", "skipped_duplicate"}
+)
+
+
+def _loads(value: str | None, default: object) -> object:
+    """Parse stored JSON; a corrupt row must not break the read path."""
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
+
 
 def _split_tool_reference(reference: str) -> tuple[str, str]:
     parts = reference.rsplit("@", 1)
@@ -66,7 +84,7 @@ def _report(data: dict[str, object] | None) -> DiagnosisReport | None:
                 for ref in cast(list[dict[str, object]], item["evidence"])
             ),
         )
-        for item in cast(list[dict[str, object]], data["findings"])
+        for item in cast(list[dict[str, object]], data.get("findings", []))
     )
     hypotheses = tuple(
         DiagnosisHypothesis(
@@ -88,28 +106,26 @@ def _report(data: dict[str, object] | None) -> DiagnosisReport | None:
         for item in cast(list[dict[str, object]], data.get("hypotheses", []))
     )
     return DiagnosisReport(
-        cast(str, data["schema_version"]),
-        cast(str, data["summary"]),
-        cast(DiagnosisCategory, data["category"]),
+        cast(str, data.get("schema_version", "1.0")),
+        cast(str, data.get("summary", "")),
+        cast(DiagnosisCategory, data.get("category", "performance")),
         findings,
-        float(cast(float, data["confidence"])),
-        tuple(cast(list[str], data["limitations"])),
-        cast(str, data["model_explanation"]),
+        float(cast(float, data.get("confidence", 0.0))),
+        tuple(cast(list[str], data.get("limitations", []))),
+        cast(str, data.get("model_explanation", "")),
         hypotheses,
     )
 
 
 def _record(model: Diagnosis) -> DiagnosisRecord:
-    report_data = (
-        cast(dict[str, object], json.loads(model.report_json)) if model.report_json else None
-    )
+    report_data = cast(dict[str, object] | None, _loads(model.report_json, None))
     return DiagnosisRecord(
         model.id,
         cast(DiagnosisStatus, model.status),
         model.user_question,
         cast(DiagnosisCategory, model.category),
         model.provider,
-        tuple(cast(list[dict[str, object]], json.loads(model.plan_json))),
+        tuple(cast(list[dict[str, object]], _loads(model.plan_json, []))),
         model.progress,
         model.current_step,
         _report(report_data),
@@ -175,6 +191,10 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             model = session.get(Diagnosis, diagnosis_id)
             if model is None:
                 raise KeyError(diagnosis_id)
+            # CAS: a late progress write must not revive a terminal diagnosis
+            # (e.g. overwrite cancelled/failed after the run already stopped).
+            if model.status in _TERMINAL_STATUSES and status not in _TERMINAL_STATUSES:
+                return
             model.status, model.progress, model.current_step = status, progress, current_step
 
     def save_agent_plan(
@@ -200,8 +220,7 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             # NOTE: agent_round_count tracks the planner/agent revision number (the value
             # the coordinator reads back as `revision`), not raw model rounds.
             diagnosis.agent_round_count = max(diagnosis.agent_round_count, revision)
-            existing = cast(list[dict[str, object]], json.loads(diagnosis.plan_json))
-            existing.extend(
+            current_plan = [
                 {
                     "tool": step["tool"],
                     "arguments": step.get("arguments", {}),
@@ -209,8 +228,11 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                     "reason": step["reason"],
                 }
                 for step in steps
-            )
-            diagnosis.plan_json = json.dumps(existing, ensure_ascii=False)
+            ]
+            # `diagnoses.plan_json` is the current UI projection. Historical revisions
+            # remain in `agent_plans`; appending here mixed old and new plans and made
+            # the desktop render stale duplicate steps.
+            diagnosis.plan_json = json.dumps(current_plan, ensure_ascii=False)
             session.add(
                 AgentPlanModel(
                     id=plan_id,
@@ -227,7 +249,7 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             for index, step in enumerate(steps):
                 step_id = str(uuid.uuid4())
                 step_ids.append(step_id)
-                tool, version = str(step["tool"]).rsplit("@", 1)
+                tool, version = _split_tool_reference(str(step["tool"]))
                 arguments = cast(dict[str, object], step.get("arguments", {}))
                 session.add(
                     DiagnosisStepModel(
@@ -250,6 +272,9 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
             model = session.get(DiagnosisStepModel, step_id)
             if model is None:
                 raise KeyError(step_id)
+            # CAS: do not rewrite a step that already finished (e.g. skipped_duplicate).
+            if model.status in _TERMINAL_STEP_STATUSES:
+                return
             model.status = status
             model.tool_call_id = tool_call_id
 
@@ -347,6 +372,10 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
     ) -> None:
         timestamp = datetime.fromisoformat(updated_at)
         with self._sessions.begin() as session:
+            diagnosis = session.get(Diagnosis, diagnosis_id)
+            # CAS: do not rewrite hypothesis state for a diagnosis that already finished.
+            if diagnosis is None or diagnosis.status in _TERMINAL_STATUSES:
+                return
             existing = {
                 item.hypothesis_key: item
                 for item in session.scalars(
@@ -507,10 +536,8 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                     item.tool_name,
                     item.tool_version,
                     item.status,
-                    json.loads(item.result_json) if item.result_json else None,
-                    cast(dict[str, object], json.loads(item.summary_json))
-                    if item.summary_json
-                    else None,
+                    _loads(item.result_json, None),
+                    cast(dict[str, object] | None, _loads(item.summary_json, None)),
                     item.error_code,
                     item.started_at.isoformat(),
                     item.finished_at.isoformat() if item.finished_at else None,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, cast
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, Response, status
+from fastapi import APIRouter, Header, HTTPException, Path, Query, Request, Response, status
 from starlette.concurrency import run_in_threadpool
 
 from sysmind.api.dto.diagnoses import (
@@ -14,6 +14,7 @@ from sysmind.api.dto.diagnoses import (
     FeedbackAccepted,
     StartDiagnosisRequest,
 )
+from sysmind.core.constants import CORRELATION_HEADER
 from sysmind.diagnosis import DiagnosisCoordinator
 from sysmind.reports.redaction import redact_text
 
@@ -48,9 +49,13 @@ async def _threadpool_response(
 
 
 @router.post("", response_model=DiagnosisResponse, status_code=status.HTTP_202_ACCEPTED)
-async def start_diagnosis(payload: StartDiagnosisRequest, request: Request) -> DiagnosisResponse:
+async def start_diagnosis(
+    payload: StartDiagnosisRequest,
+    request: Request,
+    correlation_id: Annotated[str | None, Header(alias=CORRELATION_HEADER)] = None,
+) -> DiagnosisResponse:
     # Coordinator.start schedules asyncio tasks and must run on the event loop.
-    record = _coordinator(request).start(payload.question)
+    record = _coordinator(request).start(payload.question, correlation_id=correlation_id)
     return DiagnosisResponse.from_record(record)
 
 
@@ -93,7 +98,13 @@ async def get_diagnosis(diagnosis_id: DiagnosisId, request: Request) -> Diagnosi
 
 
 @router.post("/{diagnosis_id}/cancel", response_model=DiagnosisResponse)
-async def cancel_diagnosis(diagnosis_id: DiagnosisId, request: Request) -> DiagnosisResponse:
+async def cancel_diagnosis(
+    diagnosis_id: DiagnosisId,
+    request: Request,
+    # Accepted for request/task tracing parity with start_diagnosis (CORS already allows it).
+    correlation_id: Annotated[str | None, Header(alias=CORRELATION_HEADER)] = None,
+) -> DiagnosisResponse:
+    del correlation_id
     coordinator = _coordinator(request)
     if await run_in_threadpool(coordinator.cancel, diagnosis_id) is None:
         raise HTTPException(status_code=404, detail="Diagnosis not found.")

@@ -24,29 +24,42 @@ from sysmind.infrastructure.database.models import (
     AgentToolCall,
 )
 
+_TERMINAL_STATUSES = frozenset({"completed", "cancelled", "failed", "timed_out", "interrupted"})
+
 
 def _parse_time(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+def _loads(raw: str | None, default: object) -> object:
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 def _task_record(model: AgentTask) -> AgentTaskRecord:
-    budget_data = cast(dict[str, object], json.loads(model.budget_json))
+    budget_data = cast(dict[str, object], _loads(model.budget_json, {}))
+    allowed_tools = cast(list[str], _loads(model.allowed_tools_json, []))
+    working_summary = cast(dict[str, object], _loads(model.working_summary_json, {}))
     return AgentTaskRecord(
         id=model.id,
         status=cast(AgentTaskStatus, model.status),
         user_goal=model.user_goal,
         provider=model.provider,
-        allowed_tools=tuple(cast(list[str], json.loads(model.allowed_tools_json))),
+        allowed_tools=tuple(allowed_tools),
         budget=AgentBudget(
-            max_rounds=cast(int, budget_data["max_rounds"]),
-            max_tool_calls=cast(int, budget_data["max_tool_calls"]),
-            timeout_seconds=cast(float, budget_data["timeout_seconds"]),
-            max_parallel_tools=cast(int, budget_data["max_parallel_tools"]),
+            max_rounds=cast(int, budget_data.get("max_rounds", 4)),
+            max_tool_calls=cast(int, budget_data.get("max_tool_calls", 8)),
+            timeout_seconds=cast(float, budget_data.get("timeout_seconds", 30.0)),
+            max_parallel_tools=cast(int, budget_data.get("max_parallel_tools", 2)),
         ),
         current_round=model.current_round,
         tool_call_count=model.tool_call_count,
         progress=model.progress,
-        working_summary=cast(dict[str, object], json.loads(model.working_summary_json)),
+        working_summary=working_summary,
         final_output=model.final_output,
         failure_code=model.failure_code,
         failure_message=model.failure_message,
@@ -63,7 +76,7 @@ def _event_record(model: AgentTaskEventModel) -> AgentTaskEvent:
         id=model.id,
         task_id=model.task_id,
         event_type=cast(AgentEventType, model.event_type),
-        data=cast(dict[str, object], json.loads(model.data_json)),
+        data=cast(dict[str, object], _loads(model.data_json, {})),
         created_at=model.created_at.isoformat(),
     )
 
@@ -82,7 +95,7 @@ def _tool_record(model: AgentToolCall) -> AgentToolCallRecord:
         finished_at=model.finished_at.isoformat() if model.finished_at else None,
         duration_ms=model.duration_ms,
         result_summary=(
-            cast(dict[str, object], json.loads(model.result_summary_json))
+            cast(dict[str, object], _loads(model.result_summary_json, {}))
             if model.result_summary_json
             else None
         ),
@@ -146,6 +159,9 @@ class SqlAlchemyAgentTaskRepository(AgentTaskRepository):
             model = session.get(AgentTask, task_id)
             if model is None:
                 raise KeyError(task_id)
+            # Optimistic guard: a late progress write must not revive a terminal task.
+            if model.status in _TERMINAL_STATUSES and status not in _TERMINAL_STATUSES:
+                return _task_record(model)
             model.status = status
             model.current_round = current_round
             model.tool_call_count = tool_call_count

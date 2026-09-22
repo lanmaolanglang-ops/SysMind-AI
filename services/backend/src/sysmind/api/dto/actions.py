@@ -4,7 +4,12 @@ from dataclasses import asdict
 
 from pydantic import BaseModel, Field
 
-from sysmind.domain.actions import ActionRecord, ProcessActionCandidate, StartupActionCandidate
+from sysmind.domain.actions import (
+    ActionRecord,
+    ActionStatus,
+    ProcessActionCandidate,
+    StartupActionCandidate,
+)
 
 
 class CandidateResponse(BaseModel):
@@ -55,7 +60,7 @@ class ActionResponse(BaseModel):
     tool_version: str
     target_name: str
     source_kind: str
-    status: str
+    status: ActionStatus
     recovery_available: bool
     error_code: str | None
     error_message: str | None

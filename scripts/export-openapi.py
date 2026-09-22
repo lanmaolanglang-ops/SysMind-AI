@@ -5,6 +5,7 @@ import secrets
 from pathlib import Path
 
 from pydantic import SecretStr
+
 from sysmind.api.app import create_app
 from sysmind.core.config import Settings
 

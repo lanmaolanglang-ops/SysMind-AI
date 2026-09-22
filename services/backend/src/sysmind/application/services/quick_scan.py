@@ -7,15 +7,19 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
-from functools import partial
 from threading import Event
 from typing import Literal
 
 from sysmind.application.ports.scans import ScanRepository
 from sysmind.domain.diagnostics import ScanRecord, StepStatus
 from sysmind.observability.logging import log_event
-from sysmind.tools.contracts import ToolCancelledError, ToolSpec, ToolUnavailableError
-from sysmind.tools.executor import arguments_hash
+from sysmind.tools.contracts import (
+    ToolCancelledError,
+    ToolPermissionError,
+    ToolSpec,
+    ToolUnavailableError,
+)
+from sysmind.tools.executor import AnyCancelEvent, arguments_hash
 from sysmind.tools.process import PROCESS_TOOL_SPECS, ProcessTools
 from sysmind.tools.system import SYSTEM_TOOL_SPECS, SystemTools
 
@@ -31,39 +35,8 @@ NO_ARGUMENTS_HASH = arguments_hash({})
 # new one. These bounds keep the automatic retry from becoming a surprise: only
 # scans young enough to still describe the current machine are replayed, and only
 # a small number per startup so a backlog cannot flood the machine on launch.
-REPLAY_WINDOW_SECONDS = 900
-MAX_REPLAYS_PER_STARTUP = 2
-
-
 def _now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _started_within_replay_window(record: ScanRecord) -> bool:
-    try:
-        started = datetime.fromisoformat(record.started_at)
-    except ValueError:
-        return False
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - started).total_seconds() <= REPLAY_WINDOW_SECONDS
-
-
-def _interrupted_by_restart(record: ScanRecord) -> bool:
-    # `mark_interrupted` records the restart as a normal failure carrying this
-    # code, so it is the only reliable way to tell "the backend died mid-scan"
-    # from a scan that genuinely failed.
-    return record.status == "failed" and any(
-        failure.get("code") == "backend_restarted" for failure in record.failures
-    )
-
-
-def _discard_task(
-    tasks: dict[str, asyncio.Task[None]],
-    scan_id: str,
-    _task: asyncio.Task[None],
-) -> None:
-    tasks.pop(scan_id, None)
 
 
 def _serialize(value: object) -> object:
@@ -77,12 +50,18 @@ def _serialize(value: object) -> object:
 
 
 def _failure(error: Exception) -> tuple[str, str, StepStatus]:
+    # Keep exception coverage aligned with LogAnalysisCoordinator._failure so the two
+    # coordinators report the same failure classes the same way.
     if isinstance(error, TimeoutError):
         return "tool_timeout", "采集步骤超时，已跳过该项。", "timed_out"
+    if isinstance(error, ToolPermissionError):
+        return "permission_required", str(error), "failed"
     if isinstance(error, ToolUnavailableError):
         return "capability_unavailable", str(error), "failed"
     if isinstance(error, ToolCancelledError):
         return "scan_cancelled", "扫描已取消。", "cancelled"
+    if isinstance(error, ValueError):
+        return "invalid_query", "采集参数不符合安全范围。", "failed"
     return "collection_failed", "该项系统信息暂时无法读取。", "failed"
 
 
@@ -126,50 +105,12 @@ class QuickScanCoordinator:
         return self._repository.recent(limit)
 
     def recover_interrupted(self) -> int:
-        interrupted = self._repository.mark_interrupted(_now())
-        if interrupted:
-            self._replay_recently_interrupted()
-        return interrupted
+        """Mark orphaned scans as failed; do not auto-replay.
 
-    def _replay_recently_interrupted(self) -> int:
-        """Re-run scans a crash cut short instead of leaving them for the user.
-
-        Only scans started inside REPLAY_WINDOW_SECONDS qualify. An older
-        "running" row describes a machine state that has since moved on, and
-        replaying it would present stale evidence as if it were current.
+        PRD/ADR require that an interrupted run terminates rather than silently
+        restarting collection. Users can start a new scan from the UI.
         """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            # Startup outside an event loop (tests, CLI) cannot schedule a replay.
-            return 0
-        candidates = [
-            record
-            for record in self._repository.recent(MAX_REPLAYS_PER_STARTUP * 5)
-            if _interrupted_by_restart(record) and _started_within_replay_window(record)
-        ]
-        replayed = 0
-        for record in candidates[:MAX_REPLAYS_PER_STARTUP]:
-            cancellation = Event()
-            self._cancellations[record.id] = cancellation
-            task = asyncio.create_task(
-                self._run_guarded(record.id, cancellation, None),
-                name=f"quick-scan-replay-{record.id}",
-            )
-            self._tasks[record.id] = task
-            # partial() binds the id now; a lambda in this loop would capture the
-            # last record and pop the wrong entry when the task finishes.
-            task.add_done_callback(partial(_discard_task, self._tasks, record.id))
-            replayed += 1
-            log_event(
-                _LOGGER,
-                logging.INFO,
-                "Quick scan replayed after an interrupted run.",
-                component="quick_scan",
-                event_type="scan_replayed",
-                scan_id=record.id,
-            )
-        return replayed
+        return self._repository.mark_interrupted(_now())
 
     def cancel(self, scan_id: str) -> ScanRecord | None:
         record = self._repository.get(scan_id)
@@ -189,12 +130,16 @@ class QuickScanCoordinator:
         for task in pending:
             task.cancel()
 
-    async def _run(self, scan_id: str, cancellation: Event, correlation_id: str | None) -> None:
+    async def _run(
+        self,
+        scan_id: str,
+        cancellation: Event,
+        correlation_id: str | None,
+        collected_summary: dict[str, object],
+    ) -> None:
         specs = {spec.name: spec for spec in (*SYSTEM_TOOL_SPECS, *PROCESS_TOOL_SPECS)}
-        handlers = {
-            **self._system_tools.handlers(),
-            **self._process_tools.handlers(cancellation),
-        }
+        system_handlers = self._system_tools.handlers()
+        process_names = {spec.name for spec in PROCESS_TOOL_SPECS}
         result_keys = {
             "system.os": "operating_system",
             "system.cpu": "cpu",
@@ -204,13 +149,18 @@ class QuickScanCoordinator:
             "process.snapshot": "processes",
             "process.high_usage": "high_usage_processes",
         }
-        summary: dict[str, object] = {
-            "capabilities": _serialize(self._system_tools.capabilities()),
-        }
+        summary = collected_summary
+        summary.setdefault(
+            "capabilities", _serialize(self._system_tools.capabilities())
+        )
         failures: list[dict[str, str]] = []
         ordered_names = [spec.name for spec in (*SYSTEM_TOOL_SPECS, *PROCESS_TOOL_SPECS)]
         self._repository.update(
-            scan_id, status="running", progress=0, current_step=ordered_names[0]
+            scan_id,
+            status="running",
+            progress=0,
+            current_step=ordered_names[0],
+            summary=summary,
         )
         log_event(
             _LOGGER,
@@ -227,11 +177,21 @@ class QuickScanCoordinator:
                 self._finish_cancelled(scan_id, summary, failures)
                 return
             spec = specs[name]
+            # A fresh timeout event per step so signalling one timed-out worker cannot
+            # leak into the next step, while still combining with the scan-wide cancel.
+            step_timeout = Event()
+            if name in process_names:
+                handler = self._process_tools.handlers(
+                    AnyCancelEvent(cancellation, step_timeout)
+                )[name]
+            else:
+                handler = system_handlers[name]
             self._repository.update(
                 scan_id,
                 status="running",
                 progress=round(index / len(ordered_names) * 100),
                 current_step=name,
+                summary=summary,
             )
             started_at = _now()
             started = time.monotonic()
@@ -241,11 +201,15 @@ class QuickScanCoordinator:
             result_summary: dict[str, object] | None = None
             try:
                 value = await asyncio.wait_for(
-                    asyncio.to_thread(handlers[name]), timeout=spec.timeout_seconds
+                    asyncio.to_thread(handler), timeout=spec.timeout_seconds
                 )
                 summary[result_keys[name]] = _serialize(value)
                 result_summary = _result_summary(value)
             except Exception as error:
+                if isinstance(error, TimeoutError):
+                    # wait_for abandons the awaitable but the worker thread keeps
+                    # running; signal just this step so it can stop.
+                    step_timeout.set()
                 error_code, error_message, step_status = _failure(error)
                 failures.append({"tool": name, "code": error_code, "message": error_message})
             finished_at = _now()
@@ -264,7 +228,13 @@ class QuickScanCoordinator:
                 self._finish_cancelled(scan_id, summary, failures)
                 return
 
-        final_status: Literal["partial", "completed"] = "partial" if failures else "completed"
+        collected_any_result = any(key in summary for key in result_keys.values())
+        if failures and not collected_any_result:
+            final_status: Literal["partial", "completed", "failed"] = "failed"
+        elif failures:
+            final_status = "partial"
+        else:
+            final_status = "completed"
         self._repository.update(
             scan_id,
             status=final_status,
@@ -293,13 +263,15 @@ class QuickScanCoordinator:
         cancellation: Event,
         correlation_id: str | None,
     ) -> None:
+        # Shared with _run so a CancelledError can still persist what was collected.
+        collected_summary: dict[str, object] = {}
         try:
             async with asyncio.timeout(30):
-                await self._run(scan_id, cancellation, correlation_id)
+                await self._run(scan_id, cancellation, correlation_id, collected_summary)
         except asyncio.CancelledError:
             record = self._repository.get(scan_id)
             if record and record.status in {"queued", "running"}:
-                self._finish_cancelled(scan_id, record.summary or {}, record.failures)
+                self._finish_cancelled(scan_id, collected_summary, record.failures)
         except TimeoutError:
             cancellation.set()
             record = self._repository.get(scan_id)

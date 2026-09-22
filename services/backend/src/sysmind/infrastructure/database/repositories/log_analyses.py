@@ -13,18 +13,27 @@ from sysmind.domain.diagnostics import StepStatus
 from sysmind.domain.event_logs import AnalysisStatus, LogAnalysisRecord
 from sysmind.infrastructure.database.models import EventLogAnalysis, EventLogStepEvent
 
+_TERMINAL_STATUSES = frozenset({"completed", "partial", "cancelled", "failed"})
+_NON_TERMINAL_STATUSES = frozenset({"queued", "running"})
+
 
 def _parse_time(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
 
 
+def _loads(raw: str | None, default: object) -> object:
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 def _to_record(model: EventLogAnalysis) -> LogAnalysisRecord:
-    query = cast(dict[str, object], json.loads(model.query_json))
-    summary = cast(
-        dict[str, object] | None,
-        json.loads(model.summary_json) if model.summary_json else None,
-    )
-    failures = tuple(cast(list[dict[str, str]], json.loads(model.failures_json)))
+    query = cast(dict[str, object], _loads(model.query_json, {}))
+    summary = cast(dict[str, object] | None, _loads(model.summary_json, None))
+    failures = cast(list[dict[str, str]], _loads(model.failures_json, []))
     return LogAnalysisRecord(
         id=model.id,
         status=cast(AnalysisStatus, model.status),
@@ -34,7 +43,7 @@ def _to_record(model: EventLogAnalysis) -> LogAnalysisRecord:
         finished_at=model.finished_at.isoformat() if model.finished_at else None,
         query=query,
         summary=summary,
-        failures=failures,
+        failures=tuple(failures),
         schema_version=model.schema_version,
     )
 
@@ -74,6 +83,9 @@ class SqlAlchemyLogAnalysisRepository(LogAnalysisRepository):
             model = session.get(EventLogAnalysis, analysis_id)
             if model is None:
                 raise KeyError(analysis_id)
+            # Optimistic guard: never revive a terminal row with a non-terminal status.
+            if model.status in _TERMINAL_STATUSES and status in _NON_TERMINAL_STATUSES:
+                return _to_record(model)
             model.status = status
             model.progress = progress
             model.current_step = current_step
@@ -139,7 +151,7 @@ class SqlAlchemyLogAnalysisRepository(LogAnalysisRepository):
             )
             models = list(session.scalars(statement))
             for model in models:
-                failures = json.loads(model.failures_json)
+                failures = cast(list[dict[str, str]], _loads(model.failures_json, []))
                 failures.append(
                     {
                         "tool": model.current_step or "log_analysis",

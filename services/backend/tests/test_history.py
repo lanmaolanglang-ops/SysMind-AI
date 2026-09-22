@@ -123,7 +123,11 @@ def test_action_linked_diagnosis_is_protected_from_delete_and_retention(tmp_path
         preview = client.get(
             "/api/v1/history/diagnosis/diagnosis-protected/deletion-impact", headers=_headers()
         )
-        cleanup = client.post("/api/v1/history/cleanup", headers=_headers())
+        cleanup = client.post(
+            "/api/v1/history/cleanup",
+            headers=_headers(),
+            json={"confirm": "cleanup"},
+        )
 
     assert preview.json()["deletable"] is False
     assert "audit" in preview.json()["protected_reason"]

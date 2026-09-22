@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal, cast
+import logging
+from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Path, Request
+from pydantic import BaseModel, ConfigDict
 from starlette.concurrency import run_in_threadpool
 
 from sysmind.api.dto.history import (
@@ -20,9 +22,22 @@ from sysmind.application.services.history import (
     HistoryProtectedError,
     HistoryService,
 )
+from sysmind.observability.logging import log_event
+
+_LOGGER = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/history", tags=["history"])
 Kind = Literal["scan", "diagnosis", "log"]
+
+# Bounded, header-safe id alphabet (UUID-shaped in practice).
+RecordId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._:-]+$")]
+
+
+class CleanupConfirmRequest(BaseModel):
+    """Parameter-bound confirmation: cleanup only runs with an explicit literal."""
+
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal["cleanup"]
 
 
 def _service(request: Request) -> HistoryService:
@@ -54,13 +69,27 @@ async def update_retention(
 
 
 @router.post("/cleanup", response_model=CleanupResponse)
-async def cleanup(request: Request) -> CleanupResponse:
+async def cleanup(payload: CleanupConfirmRequest, request: Request) -> CleanupResponse:
     result = await run_in_threadpool(_service(request).cleanup)
+    log_event(
+        _LOGGER,
+        logging.INFO,
+        "History cleanup completed after explicit confirmation.",
+        component="history",
+        event_type="history_cleanup",
+        trigger="manual",
+        deleted_scans=result.deleted_scans,
+        deleted_diagnoses=result.deleted_diagnoses,
+        deleted_log_analyses=result.deleted_log_analyses,
+        protected_records=result.protected_records,
+    )
     return CleanupResponse.from_value(result)
 
 
 @router.get("/{kind}/{record_id}/deletion-impact", response_model=DeletionImpactResponse)
-async def deletion_impact(kind: Kind, record_id: str, request: Request) -> DeletionImpactResponse:
+async def deletion_impact(
+    kind: Kind, record_id: RecordId, request: Request
+) -> DeletionImpactResponse:
     value = await run_in_threadpool(_service(request).impact, kind, record_id)
     if value is None:
         raise HTTPException(status_code=404, detail="History record not found.")
@@ -69,7 +98,7 @@ async def deletion_impact(kind: Kind, record_id: str, request: Request) -> Delet
 
 @router.post("/{kind}/{record_id}/delete", response_model=DeletionResponse)
 async def delete_history(
-    kind: Kind, record_id: str, payload: ConfirmDeletionRequest, request: Request
+    kind: Kind, record_id: RecordId, payload: ConfirmDeletionRequest, request: Request
 ) -> DeletionResponse:
     try:
         await run_in_threadpool(

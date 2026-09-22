@@ -12,6 +12,8 @@ from sysmind.core.constants import API_VERSION, BACKEND_VERSION, LOOPBACK_HOST
 from sysmind.runtime.shutdown import ShutdownController
 from sysmind.security.redaction import redact_text
 
+_MAX_HTTP_HEADER_BYTES = 16 * 1024
+
 
 def bind_loopback(port: int) -> socket.socket:
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -37,6 +39,7 @@ def run_server(settings: Settings) -> None:
         port=actual_port,
         log_config=None,
         access_log=False,
+        h11_max_incomplete_event_size=_MAX_HTTP_HEADER_BYTES,
     )
     server = uvicorn.Server(config)
     controller.set_callback(lambda: setattr(server, "should_exit", True))

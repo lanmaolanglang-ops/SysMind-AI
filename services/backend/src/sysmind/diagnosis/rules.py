@@ -13,6 +13,28 @@ from sysmind.domain.diagnosis import (
 )
 
 
+def _as_float(value: object, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 def _finding(
     code: str,
     severity: str,
@@ -43,7 +65,7 @@ def build_findings(
     for call in successful:
         result = call.result
         if call.tool_name == "system.cpu" and isinstance(result, dict):
-            usage = float(result.get("utilization_percent", 0))
+            usage = _as_float(result.get("utilization_percent", 0))
             if usage >= 85:
                 findings.append(
                     _finding(
@@ -58,7 +80,7 @@ def build_findings(
                     )
                 )
         elif call.tool_name == "system.memory" and isinstance(result, dict):
-            usage = float(result.get("utilization_percent", 0))
+            usage = _as_float(result.get("utilization_percent", 0))
             if usage >= 85:
                 findings.append(
                     _finding(
@@ -74,13 +96,13 @@ def build_findings(
                 )
         elif call.tool_name == "system.disks" and isinstance(result, list):
             for index, disk in enumerate(result):
-                if isinstance(disk, dict) and float(disk.get("utilization_percent", 0)) >= 90:
+                if isinstance(disk, dict) and _as_float(disk.get("utilization_percent", 0)) >= 90:
                     findings.append(
                         _finding(
                             "disk_capacity_pressure",
                             "high",
                             "磁盘剩余空间不足",
-                            f"卷使用率为 {float(disk['utilization_percent']):.1f}%。",
+                            f"卷使用率为 {_as_float(disk['utilization_percent']):.1f}%。",
                             "优先手动检查可安全清理的数据，不自动删除文件。",
                             0.95,
                             call,
@@ -101,7 +123,7 @@ def build_findings(
                 )
             )
         elif call.tool_name == "startup.analyze" and isinstance(result, dict):
-            count = int(result.get("item_count", 0))
+            count = _as_int(result.get("item_count", 0))
             if count >= 20:
                 findings.append(
                     _finding(
@@ -116,7 +138,7 @@ def build_findings(
                     )
                 )
         elif call.tool_name == "service.analyze" and isinstance(result, dict):
-            count = int(result.get("stopped_automatic_count", 0))
+            count = _as_int(result.get("stopped_automatic_count", 0))
             if count:
                 findings.append(
                     _finding(
@@ -178,7 +200,7 @@ def build_findings(
             if (
                 active_adapter_count is not None
                 and active_adapter_path is not None
-                and int(cast(int | str, active_adapter_count)) == 0
+                and _as_int(cast(int | str, active_adapter_count)) == 0
             ):
                 findings.append(
                     _finding(
@@ -305,13 +327,13 @@ def build_findings(
                         "$.failures",
                     )
                 )
-            if isinstance(ping, dict) and float(ping.get("loss_percent", 0)) >= 50:
+            if isinstance(ping, dict) and _as_float(ping.get("loss_percent", 0)) >= 50:
                 findings.append(
                     _finding(
                         "network_packet_loss",
                         "high",
                         "固定目标连通性较差",
-                        f"受限 ICMP 测试丢包率为 {float(ping['loss_percent']):.1f}%。",
+                        f"受限 ICMP 测试丢包率为 {_as_float(ping['loss_percent']):.1f}%。",
                         "检查本机连接和网关；目标可能禁用 ICMP，因此该证据不能单独定论。",
                         0.7,
                         call,
@@ -319,7 +341,7 @@ def build_findings(
                     )
                 )
         elif call.tool_name == "log.crash.analyze" and isinstance(result, list) and result:
-            total = sum(int(item.get("count", 0)) for item in result if isinstance(item, dict))
+            total = sum(_as_int(item.get("count", 0)) for item in result if isinstance(item, dict))
             findings.append(
                 _finding(
                     "application_crashes",

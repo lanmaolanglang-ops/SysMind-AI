@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -25,10 +26,12 @@ from sysmind.diagnosis.rules import build_findings
 from sysmind.domain.diagnosis import (
     DiagnosisRecord,
     DiagnosisReport,
+    DiagnosisStatus,
     DiagnosisToolCall,
     StopReason,
     diagnostic_findings,
 )
+from sysmind.observability.logging import log_event
 from sysmind.prompts.report_explainer import LocalReportExplainer, ReportExplainer
 from sysmind.reports import compose_report, render_markdown
 from sysmind.reports.evidence import evidence_path_exists
@@ -36,6 +39,8 @@ from sysmind.security.redaction import redact_arguments
 from sysmind.tools.executor import ToolExecutor, arguments_hash
 from sysmind.tools.policy import ToolPolicy
 from sysmind.tools.registry import ToolRegistry
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -62,7 +67,7 @@ class DiagnosisCoordinator:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._cancellations: dict[str, Event] = {}
 
-    def start(self, question: str) -> DiagnosisRecord:
+    def start(self, question: str, *, correlation_id: str | None = None) -> DiagnosisRecord:
         category, classified = classify_question(question)
         planner = self._planner_factory()
         diagnosis_id = str(uuid.uuid4())
@@ -73,6 +78,15 @@ class DiagnosisCoordinator:
             provider=planner.name,
             plan=(),
             created_at=_now(),
+        )
+        log_event(
+            _LOGGER,
+            logging.INFO,
+            "Diagnosis started.",
+            component="diagnosis",
+            event_type="diagnosis_started",
+            diagnosis_id=diagnosis_id,
+            correlation_id=correlation_id,
         )
         self._schedule(record, classified, planner, self._explainer_factory())
         return record
@@ -486,7 +500,7 @@ class DiagnosisCoordinator:
             },
             created_at=_now(),
         )
-        final_status = (
+        final_status: DiagnosisStatus = (
             "partial" if limitations or stop_reason != "evidence_sufficient" else "completed"
         )
         stop_details = {
@@ -573,7 +587,7 @@ class DiagnosisCoordinator:
         diagnosis_id: str,
         *,
         reason: StopReason,
-        status: str,
+        status: DiagnosisStatus,
         code: str,
         message: str,
     ) -> None:
@@ -641,7 +655,11 @@ class DiagnosisCoordinator:
         for index, step in enumerate(steps):
             if cancellation.is_set():
                 raise asyncio.CancelledError
-            name, version = step.tool.rsplit("@", 1)
+            parts = step.tool.rsplit("@", 1)
+            if len(parts) == 2 and parts[0] and parts[1]:
+                name, version = parts
+            else:
+                name, version = step.tool, "1.0"
             call_id = str(uuid.uuid4())
             self._repository.update_progress(
                 diagnosis_id,

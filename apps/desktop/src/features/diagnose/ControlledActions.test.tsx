@@ -43,7 +43,7 @@ describe("ControlledActions", () => {
     expect(postJson).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "我已了解，确认停用" }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/actions/action-1/confirm"));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/actions/action-1/confirm", undefined));
     expect(await screen.findByText("启动项已禁用并验证")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "恢复自动启动" })).toBeInTheDocument();
   });
@@ -54,9 +54,17 @@ describe("ControlledActions", () => {
       items: [{ item_id: "a".repeat(64), name: "Example", source_kind: "user_run",
         command_name: "example.exe", observed_revision: "b".repeat(64) }],
     });
-    vi.spyOn(client, "post").mockResolvedValue({
-      action: { ...proposed, status: "confirmed" }, ticket: "ticket", expires_at: "soon",
-    });
+    const post = vi.spyOn(client, "post")
+      .mockResolvedValueOnce({
+        action: { ...proposed, status: "confirmed" }, ticket: "ticket", expires_at: "soon",
+      })
+      .mockResolvedValueOnce({
+        ...proposed,
+        id: "restore-action",
+        tool_name: "startup.restore_current_user",
+        status: "proposed",
+        recovery_available: false,
+      });
     vi.spyOn(client, "postJson")
       .mockResolvedValueOnce(proposed)
       .mockResolvedValueOnce({
@@ -75,7 +83,8 @@ describe("ControlledActions", () => {
 
     expect(await screen.findByText("操作未完成")).toBeInTheDocument();
     expect(screen.getByText(/恢复资料已保留/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "恢复自动启动" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "恢复自动启动" }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/actions/action-1/recovery", undefined));
   });
 
   it("never escalates a pending GUI close request to forced termination", async () => {

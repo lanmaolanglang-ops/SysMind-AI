@@ -173,9 +173,15 @@ def main() -> None:
             results["data_directory_created"] = data_directory.is_dir()
             results["database_migrated_to_head"] = wait_for_database_head(database_path)
             results["database_created"] = database_path.is_file()
-            command_line = backend.cmdline()
+            command_line = backend.cmdline() or []
+            session_token = (backend.environ() or {}).get("SYSMIND_SESSION_TOKEN", "")
             results["bundled_backend_started"] = True
-            results["session_token_not_in_arguments"] = "--session-token" not in command_line
+            # Scan every argv string: the token must not appear as its own value,
+            # nor via `--session-token` / `--session-token=...` prefix forms.
+            results["session_token_not_in_arguments"] = not any(
+                part.startswith("--session-token") or (session_token and session_token in part)
+                for part in command_line
+            )
 
             second = launch(executable, data_directory)
             try:

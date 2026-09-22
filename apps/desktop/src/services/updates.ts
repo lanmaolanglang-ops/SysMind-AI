@@ -5,7 +5,12 @@ import { check } from "@tauri-apps/plugin-updater";
 export interface AvailableUpdate {
   version: string;
   notes: string | null;
-  install(): Promise<void>;
+  /**
+   * Installs the update and attempts to relaunch.
+   * Resolves `{ relaunched: false }` when install succeeded but restart failed.
+   * Rejects only when the install itself failed.
+   */
+  install(): Promise<{ relaunched: boolean }>;
 }
 
 export async function getAppVersion(): Promise<string> {
@@ -21,7 +26,13 @@ export async function checkForAppUpdate(): Promise<AvailableUpdate | null> {
     notes: update.body ?? null,
     install: async () => {
       await update.downloadAndInstall();
-      await relaunch();
+      try {
+        await relaunch();
+        return { relaunched: true };
+      } catch {
+        // Install already replaced the binary; only the restart step failed.
+        return { relaunched: false };
+      }
     },
   };
 }

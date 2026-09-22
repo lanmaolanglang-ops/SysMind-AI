@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Literal, TypeAlias
 
 ActionStatus: TypeAlias = Literal[
@@ -43,6 +45,7 @@ class ProcessActionCandidate:
 
 
 ActionCandidate: TypeAlias = StartupActionCandidate | ProcessActionCandidate
+MutationOutcome: TypeAlias = Literal["succeeded", "closed", "close_pending", "terminated"]
 
 # Controlled-action tools are driven by the ActionCoordinator rather than the read-only
 # Tool Registry, so their canonical names and versions are defined here. Keeping both in
@@ -52,16 +55,29 @@ RESTORE_STARTUP_TOOL = "startup.restore_current_user"
 CLOSE_PROCESS_TOOL = "process.request_close_current_user"
 TERMINATE_PROCESS_TOOL = "process.terminate_current_user"
 
-ACTION_TOOL_VERSIONS: dict[str, str] = {
-    DISABLE_STARTUP_TOOL: "1.0",
-    RESTORE_STARTUP_TOOL: "1.0",
-    CLOSE_PROCESS_TOOL: "1.0",
-    TERMINATE_PROCESS_TOOL: "1.0",
-}
+# Read-only view: versions are part of the audit contract and must not drift at runtime.
+ACTION_TOOL_VERSIONS: Mapping[str, str] = MappingProxyType(
+    {
+        DISABLE_STARTUP_TOOL: "1.0",
+        RESTORE_STARTUP_TOOL: "1.0",
+        CLOSE_PROCESS_TOOL: "1.0",
+        TERMINATE_PROCESS_TOOL: "1.0",
+    }
+)
 
 
 def action_tool_version(tool_name: str) -> str:
-    return ACTION_TOOL_VERSIONS.get(tool_name, "1.0")
+    """Return the canonical audit version for a controlled-action tool.
+
+    Unregistered tools raise instead of inventing ``1.0`` so action audit rows can
+    never record a fabricated version.
+    """
+    try:
+        return ACTION_TOOL_VERSIONS[tool_name]
+    except KeyError:
+        raise KeyError(
+            f"Unregistered action tool {tool_name!r}; refusing to invent a tool version."
+        ) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,4 +103,4 @@ class ActionRecord:
 class MutationResult:
     recovery_id: str | None
     verified_revision: str | None
-    outcome: str = "succeeded"
+    outcome: MutationOutcome = "succeeded"
