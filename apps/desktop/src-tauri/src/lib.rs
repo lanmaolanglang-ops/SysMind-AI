@@ -60,14 +60,22 @@ pub fn run() {
             state.start(&handle);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Closing the last window must tear down the sidecar even if the
+            // event loop later hangs or only emits Exit after a delay. Shutdown
+            // is idempotent, so the RunEvent::Exit path remains safe.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                window.app_handle().state::<BackendManager>().shutdown();
+            }
+        })
         .invoke_handler(tauri::generate_handler![backend_status, restart_backend])
         .build(tauri::generate_context!())
         .expect("failed to build SysMind AI desktop")
         .run(|app_handle, event| {
-            // ExitRequested can be prevented (e.g. by the updater). Only tear
-            // down the sidecar on RunEvent::Exit, which is emitted solely for
-            // non-prevented exits.
-            if matches!(event, RunEvent::Exit) {
+            // ExitRequested can be prevented (e.g. by the updater). Tear down
+            // the sidecar for both ExitRequested and Exit so a late/prevented
+            // path cannot leave an orphan backend. Shutdown is idempotent.
+            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
                 app_handle.state::<BackendManager>().shutdown();
             }
         });
