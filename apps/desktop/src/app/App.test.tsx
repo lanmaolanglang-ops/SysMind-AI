@@ -76,24 +76,26 @@ describe("App", () => {
 
     expect(await screen.findByText("本地服务已连接")).toBeInTheDocument();
     expect(screen.getByText("127.0.0.1")).toBeInTheDocument();
-    expect(screen.getByText("设备概览")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "问题诊断", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("自然语言诊断面板")).toBeInTheDocument();
-    expect(screen.getByText("安全更新面板")).toBeInTheDocument();
+    expect(screen.queryByText("安全更新面板")).not.toBeInTheDocument();
     expect(screen.queryByText("快速扫描面板")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /高级工具/ }));
+    fireEvent.click(screen.getByRole("button", { name: /设备扫描/ }));
     expect(screen.getByText("快速扫描面板")).toBeInTheDocument();
     expect(screen.queryByText("自然语言诊断面板")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "事件日志" }));
+    fireEvent.click(screen.getByRole("button", { name: /事件日志/ }));
     expect(screen.getByText("日志分析面板")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "模型与隐私" }));
+    fireEvent.click(screen.getByRole("button", { name: /模型与隐私/ }));
     expect(screen.getByText("模型设置面板")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "开发者 Agent" }));
+    fireEvent.click(screen.getByRole("button", { name: /受限 Agent/ }));
     expect(screen.getByText("Agent 任务面板")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /记录与报告/ }));
     expect(screen.getByText("历史记录面板")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /应用更新/ }));
+    expect(screen.getByText("安全更新面板")).toBeInTheDocument();
   });
 
   it("shows a recoverable startup failure", async () => {

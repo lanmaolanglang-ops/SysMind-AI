@@ -27,4 +27,24 @@ describe("HistoryPanel", () => {
       "/api/v1/history/scan/scan-1/delete", { revision: "a".repeat(64) }, undefined,
     );
   });
+
+  it("shows available history when one source fails", async () => {
+    const client = new ApiClient({ baseUrl: "http://127.0.0.1:45000", sessionToken: "test" });
+    vi.spyOn(client, "get").mockImplementation((path) => {
+      if (path === "/api/v1/scans") return Promise.resolve({ items: [{ id: "scan-1", status: "completed", started_at: "2026-01-01T00:00:00Z" }] });
+      if (path === "/api/v1/diagnoses") return Promise.reject(new Error("temporary failure"));
+      return Promise.resolve({ items: [] });
+    });
+    render(<HistoryPanel client={client} />);
+    expect(await screen.findByText("快速扫描")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("部分历史暂时不可用");
+  });
+
+  it("does not claim history is empty when every source fails", async () => {
+    const client = new ApiClient({ baseUrl: "http://127.0.0.1:45000", sessionToken: "test" });
+    vi.spyOn(client, "get").mockRejectedValue(new Error("offline"));
+    render(<HistoryPanel client={client} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("历史记录暂时不可用");
+    expect(screen.queryByText(/暂无符合筛选条件的记录/)).not.toBeInTheDocument();
+  });
 });

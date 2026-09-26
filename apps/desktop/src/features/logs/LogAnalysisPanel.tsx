@@ -58,7 +58,11 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     const controller = new AbortController();
     void getRecentLogAnalyses(client, controller.signal)
-      .then((response) => setRecord(response.items[0] ?? null))
+      .then((response) => {
+        if (!controller.signal.aborted) {
+          setRecord((current) => current ?? response.items[0] ?? null);
+        }
+      })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(errorCopy(reason));
       });
@@ -96,16 +100,16 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
     };
   }, [activeId, client]);
 
-  const parsedEventIds = useMemo(
-    () =>
-      eventIds
-        .split(/[，,\s]+/)
-        .filter(Boolean)
-        .map(Number)
-        .filter((value) => Number.isInteger(value) && value >= 0 && value <= 65535)
-        .slice(0, 32),
-    [eventIds],
-  );
+  const eventIdFilter = useMemo(() => {
+    const values = eventIds.trim().split(/[，,\s]+/).filter(Boolean);
+    if (values.length > 32) {
+      return { ids: [] as number[], error: "事件 ID 最多输入 32 个。" };
+    }
+    if (values.some((value) => !/^\d+$/.test(value) || Number(value) > 65535)) {
+      return { ids: [] as number[], error: "事件 ID 只能是 0–65535 的整数，请用逗号或空格分隔。" };
+    }
+    return { ids: values.map(Number), error: null };
+  }, [eventIds]);
 
   const toggleChannel = (channel: LogChannel) => {
     setChannels((current) =>
@@ -128,13 +132,14 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
   };
 
   const start = () => {
+    if (eventIdFilter.error) return;
     setBusy(true);
     setError(null);
     void startLogAnalysis(client, {
       channels,
       lookback_hours: lookback,
       levels,
-      event_ids: parsedEventIds,
+      event_ids: eventIdFilter.ids,
       max_events: 100,
     })
       .then(setRecord)
@@ -203,7 +208,10 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
             value={eventIds}
             onChange={(event) => setEventIds(event.target.value)}
             placeholder="例如 1000, 1001"
+            aria-invalid={Boolean(eventIdFilter.error)}
+            aria-describedby={eventIdFilter.error ? "event-id-error" : undefined}
           />
+          {eventIdFilter.error && <span className="field-error" id="event-id-error" role="alert">{eventIdFilter.error}</span>}
         </label>
       </div>
 
@@ -221,7 +229,7 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
             </button>
           </>
         ) : (
-          <button className="primary-action" type="button" onClick={start} disabled={busy}>
+          <button className="primary-action" type="button" onClick={start} disabled={busy || Boolean(eventIdFilter.error)}>
             {busy ? "正在创建…" : record ? "重新分析" : "开始分析"}
           </button>
         )}

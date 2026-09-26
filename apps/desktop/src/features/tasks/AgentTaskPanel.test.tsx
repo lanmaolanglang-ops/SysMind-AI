@@ -90,8 +90,8 @@ describe("AgentTaskPanel", () => {
     });
 
     render(<AgentTaskPanel client={api} />);
-    fireEvent.click(await screen.findByLabelText("system.cpu"));
-    fireEvent.click(screen.getByRole("button", { name: "运行离线自检" }));
+    fireEvent.click(await screen.findByLabelText("处理器状态"));
+    fireEvent.click(screen.getByRole("button", { name: "运行只读自检" }));
 
     expect(await screen.findByText("Phase 3 离线 Agent Runtime 自检完成。")).toBeInTheDocument();
     expect(screen.getByText("正在规划受限步骤")).toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("AgentTaskPanel", () => {
 
     render(<AgentTaskPanel client={api} />);
 
-    expect(await screen.findByText("Fake Provider · 离线")).toBeInTheDocument();
+    expect(await screen.findByText("本地模拟模型 · 离线")).toBeInTheDocument();
     expect(screen.getByText(/这里不会生成诊断报告/)).toBeInTheDocument();
   });
 });

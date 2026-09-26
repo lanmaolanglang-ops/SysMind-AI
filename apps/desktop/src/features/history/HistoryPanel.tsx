@@ -37,7 +37,7 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    void Promise.all([
+    void Promise.allSettled([
       getRecentScans(client, controller.signal),
       recentDiagnoses(client, controller.signal),
       getRecentLogAnalyses(client, controller.signal),
@@ -45,19 +45,22 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
       getBaseline(client, controller.signal),
     ])
       .then(([scans, diagnoses, logs, actions, baselineResult]) => {
+        if (controller.signal.aborted) return;
         setItems([
-          ...scans.items.map((item) => ({ id: item.id, kind: "scan" as const,
+          ...(scans.status === "fulfilled" ? scans.value.items : []).map((item) => ({ id: item.id, kind: "scan" as const,
             title: "快速扫描", status: item.status, timestamp: item.started_at })),
-          ...diagnoses.items.map((item) => ({ id: item.id, kind: "diagnosis" as const,
+          ...(diagnoses.status === "fulfilled" ? diagnoses.value.items : []).map((item) => ({ id: item.id, kind: "diagnosis" as const,
             title: item.report?.summary ?? "诊断报告", status: item.status,
             timestamp: item.created_at })),
-          ...logs.items.map((item) => ({ id: item.id, kind: "log" as const,
+          ...(logs.status === "fulfilled" ? logs.value.items : []).map((item) => ({ id: item.id, kind: "log" as const,
             title: "日志分析", status: item.status, timestamp: item.started_at })),
-          ...actions.items.map((item) => ({ id: item.id, kind: "action" as const,
+          ...(actions.status === "fulfilled" ? actions.value.items : []).map((item) => ({ id: item.id, kind: "action" as const,
             title: item.target_name, status: item.status, timestamp: null })),
         ]);
-        setBaseline(baselineResult.items);
-        setError(null);
+        setBaseline(baselineResult.status === "fulfilled" ? baselineResult.value.items : []);
+        const failures = [scans, diagnoses, logs, actions, baselineResult].filter((result) => result.status === "rejected").length;
+        setError(failures === 0 ? null : failures === 5
+          ? "历史记录暂时不可用。" : "部分历史暂时不可用；已显示读取成功的记录。");
       })
       .catch(() => {
         if (!controller.signal.aborted) setError("历史记录暂时不可用。");
@@ -139,7 +142,7 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
           <button type="button" onClick={() => setImpact(null)}>取消</button>
         </div>
       </div>}
-      {!error && !loading && visible.length === 0 && <p>暂无数据。先运行一次扫描或诊断。</p>}
+      {!error && !loading && visible.length === 0 && <p className="quiet-result">暂无符合筛选条件的记录。可以从“问题诊断”或“设备扫描”开始一次只读检查。</p>}
       <ul className="history-list">{visible.map((item) => <li key={`${item.kind}-${item.id}`}>
         <div><strong>{item.title}</strong><small>{kindLabels[item.kind]}</small><details className="history-technical"><summary>记录编号</summary><code>{item.id}</code></details></div>
         <span>{statusLabels[item.status] ?? "状态未知"}{item.timestamp ? ` · ${formatLocalTimestamp(item.timestamp)}` : ""}</span>

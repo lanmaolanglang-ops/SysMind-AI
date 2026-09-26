@@ -120,4 +120,19 @@ describe("LogAnalysisPanel", () => {
       );
     });
   });
+
+  it("rejects an invalid event ID instead of silently widening the query", async () => {
+    const api = client();
+    vi.spyOn(api, "get").mockResolvedValue({ items: [] });
+    const postJson = vi.spyOn(api, "postJson").mockResolvedValue(record("running"));
+
+    render(<LogAnalysisPanel client={api} />);
+    fireEvent.change(screen.getByLabelText("事件 ID（可选）"), {
+      target: { value: "1000, abc" },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("事件 ID");
+    expect(screen.getByRole("button", { name: "开始分析" })).toBeDisabled();
+    expect(postJson).not.toHaveBeenCalled();
+  });
 });

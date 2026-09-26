@@ -55,6 +55,13 @@ const TOOL_LABELS: Record<string, string> = {
   "log.crash.analyze": "Windows 应用崩溃记录",
 };
 const FIELD_LABELS: Record<string, string> = {
+  model: "型号",
+  physical_cores: "物理核心",
+  logical_cores: "逻辑处理器",
+  frequency_mhz: "频率",
+  total_bytes: "总量",
+  available_bytes: "可用量",
+  used_bytes: "已使用",
   utilization_percent: "使用率",
   loss_percent: "丢包率",
   item_count: "数量",
@@ -74,15 +81,41 @@ function confidenceLabel(value: number) {
   return "证据仍然有限";
 }
 
-function evidenceValue(path: string, value: unknown) {
+function evidenceValue(path: string, value: unknown): string {
   if (typeof value === "boolean") return value ? "是" : "否";
   if (typeof value === "number" && path.endsWith("percent")) return `${value}%`;
+  if (typeof value === "number" && path.endsWith("_bytes")) {
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let amount = value;
+    let unit = 0;
+    while (Math.abs(amount) >= 1024 && unit < units.length - 1) {
+      amount /= 1024;
+      unit += 1;
+    }
+    return `${Number.isInteger(amount) ? amount : amount.toFixed(1)} ${units[unit]}`;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "未取得结果";
   if (value && typeof value === "object" && "item_count" in value) {
     return `${String(value.item_count)} 项`;
   }
   if (Array.isArray(value)) return `${value.length} 项`;
   if (value === null || value === undefined) return "未取得结果";
-  if (typeof value === "object") return JSON.stringify(value);
+  if (typeof value === "object") {
+    const priority = ["utilization_percent", "loss_percent", "available_bytes", "total_bytes", "model"];
+    const entries = Object.entries(value).filter(([, item]) =>
+      item !== null && (typeof item === "string" || typeof item === "number" || typeof item === "boolean"),
+    );
+    entries.sort(([left], [right]) => {
+      const leftRank = priority.indexOf(left);
+      const rightRank = priority.indexOf(right);
+      return (leftRank < 0 ? priority.length : leftRank) -
+        (rightRank < 0 ? priority.length : rightRank);
+    });
+    if (entries.length === 0) return `已记录 ${Object.keys(value).length} 项结构化结果`;
+    return entries.slice(0, 4).map(([key, item]) =>
+      `${FIELD_LABELS[key] ?? key.replaceAll("_", " ")} ${evidenceValue(key, item)}`,
+    ).join(" · ");
+  }
   if (typeof value === "string") return value;
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "symbol") return value.description ?? "符号值";
@@ -145,11 +178,22 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
     const controller = new AbortController();
     void recentDiagnoses(client, controller.signal)
       .then((result) => {
-        setHistory(result.items);
+        if (controller.signal.aborted) return;
+        // Keep a diagnosis created while the initial history request was in flight.
+        setHistory((current) => {
+          const fetched = new Set(result.items.map((item) => item.id));
+          return [...current.filter((item) => !fetched.has(item.id)), ...result.items]
+            .sort((left, right) => right.created_at.localeCompare(left.created_at));
+        });
+        // Returning after a task finishes should show its report immediately;
+        // returning while it runs restores progress and cancellation controls.
+        const latest = result.items[0];
+        if (latest) setDiagnosis((current) => current ?? latest);
         setHistoryUnavailable(false);
         setMessage(null);
       })
       .catch(() => {
+        if (controller.signal.aborted) return;
         setHistoryUnavailable(true);
         setMessage("以前的报告暂时无法读取。你仍然可以开始新的诊断。");
       });

@@ -232,34 +232,28 @@ impl BackendManager {
                 api_version: handshake.api_version,
             };
             match wait_until_ready(&backend_endpoint, Duration::from_secs(10)) {
-                Ok(()) => {
-                    let mut runtime = lock_runtime(&shared);
-                    if runtime.generation != generation {
-                        return;
-                    }
-                    runtime.snapshot = BackendSnapshot {
-                        state: "connected",
-                        endpoint: Some(backend_endpoint),
-                        error: None,
-                    };
-                }
+                Ok(()) => publish_ready_endpoint(&shared, generation, backend_endpoint),
                 Err(error) => set_failure(&shared, generation, error),
             }
         });
     }
 
     pub fn shutdown(&self) {
-        let (endpoint, mut child) = {
+        let (shutdown_generation, endpoint, mut child) = {
             let mut runtime = lock_runtime(&self.runtime);
             runtime.generation = runtime.generation.wrapping_add(1);
-            (runtime.snapshot.endpoint.clone(), runtime.child.take())
+            (
+                runtime.generation,
+                runtime.snapshot.endpoint.clone(),
+                runtime.child.take(),
+            )
         };
 
         let Some(mut owned_child) = child.take() else {
             // No child handle yet (start() lost the race before publishing it).
             // Still reset the snapshot so the UI cannot stick on "starting".
             let mut runtime = lock_runtime(&self.runtime);
-            if runtime.child.is_none() {
+            if runtime.generation == shutdown_generation && runtime.child.is_none() {
                 let previous_error = runtime.snapshot.error.take();
                 runtime.snapshot = BackendSnapshot {
                     state: "disconnected",
@@ -291,6 +285,9 @@ impl BackendManager {
         }
 
         let mut runtime = lock_runtime(&self.runtime);
+        if runtime.generation != shutdown_generation {
+            return;
+        }
         // Preserve any recorded error (e.g. an unexpected exit) instead of wiping the
         // crash context; a clean shutdown simply keeps `None`.
         let previous_error = runtime.snapshot.error.take();
@@ -314,6 +311,48 @@ fn lock_runtime(runtime: &Arc<Mutex<BackendRuntime>>) -> MutexGuard<'_, BackendR
     runtime
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn publish_ready_endpoint(
+    runtime: &Arc<Mutex<BackendRuntime>>,
+    generation: u64,
+    endpoint: BackendEndpoint,
+) {
+    let mut managed = lock_runtime(runtime);
+    if managed.generation != generation || managed.snapshot.state != "starting" {
+        return;
+    }
+    let exit_reason = match managed.child.as_mut() {
+        Some(child) => match child.try_wait() {
+            Ok(None) => None,
+            Ok(Some(status)) => Some(format!("Backend process exited during startup ({status}).")),
+            Err(error) => Some(format!(
+                "Could not verify backend process during startup: {error}"
+            )),
+        },
+        None => Some("Backend process exited during startup.".to_string()),
+    };
+    if let Some(error) = exit_reason {
+        if let Some(mut child) = managed.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        #[cfg(windows)]
+        {
+            managed.job = None;
+        }
+        managed.snapshot = BackendSnapshot {
+            state: "disconnected",
+            endpoint: None,
+            error: Some(error),
+        };
+        return;
+    }
+    managed.snapshot = BackendSnapshot {
+        state: "connected",
+        endpoint: Some(endpoint),
+        error: None,
+    };
 }
 
 fn set_failure(runtime: &Arc<Mutex<BackendRuntime>>, generation: u64, message: String) {
@@ -742,6 +781,78 @@ mod tests {
         let snapshot = lock_runtime(&runtime).snapshot.clone();
         assert_eq!(snapshot.state, "starting");
         assert!(snapshot.error.is_none());
+    }
+
+    #[test]
+    fn late_handshake_cannot_resurrect_disconnected_child() {
+        let runtime = Arc::new(Mutex::new(BackendRuntime {
+            generation: 2,
+            snapshot: BackendSnapshot {
+                state: "disconnected",
+                endpoint: None,
+                error: Some("Backend process exited unexpectedly.".to_string()),
+            },
+            child: None,
+            #[cfg(windows)]
+            job: None,
+        }));
+
+        publish_ready_endpoint(
+            &runtime,
+            2,
+            BackendEndpoint {
+                base_url: "http://127.0.0.1:43123".to_string(),
+                session_token: "test".to_string(),
+                api_version: EXPECTED_API_VERSION.to_string(),
+            },
+        );
+
+        let snapshot = lock_runtime(&runtime).snapshot.clone();
+        assert_eq!(snapshot.state, "disconnected");
+        assert!(snapshot.endpoint.is_none());
+        assert_eq!(
+            snapshot.error.as_deref(),
+            Some("Backend process exited unexpectedly.")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ready_handshake_checks_that_child_is_still_alive() {
+        let mut child = Command::new("cmd")
+            .args(["/C", "exit", "0"])
+            .spawn()
+            .expect("start disposable child");
+        child.wait().expect("child exits");
+        let runtime = Arc::new(Mutex::new(BackendRuntime {
+            generation: 1,
+            snapshot: BackendSnapshot {
+                state: "starting",
+                endpoint: None,
+                error: None,
+            },
+            child: Some(child),
+            job: None,
+        }));
+
+        publish_ready_endpoint(
+            &runtime,
+            1,
+            BackendEndpoint {
+                base_url: "http://127.0.0.1:43123".to_string(),
+                session_token: "test".to_string(),
+                api_version: EXPECTED_API_VERSION.to_string(),
+            },
+        );
+
+        let snapshot = lock_runtime(&runtime).snapshot.clone();
+        assert_eq!(snapshot.state, "disconnected");
+        assert!(snapshot.endpoint.is_none());
+        assert!(snapshot
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("exited during startup"));
     }
 
     #[test]

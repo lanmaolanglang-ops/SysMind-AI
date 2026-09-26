@@ -74,7 +74,7 @@ export function UpdatePanel({
   return (
     <section className="update-strip" aria-labelledby="update-title">
       <div>
-        <h2 id="update-title">应用更新</h2>
+        <h2 id="update-title">检查与安装更新</h2>
         <p>当前版本 {version}。更新包会先验证发布签名，诊断数据在升级时保留在本机。</p>
         <div className="update-message" aria-live="polite">
           {state.kind === "current" && <span>当前已是最新版本。</span>}

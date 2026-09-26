@@ -73,7 +73,11 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     const controller = new AbortController();
     void getRecentScans(client, controller.signal)
-      .then((response) => setScan(response.items[0] ?? null))
+      .then((response) => {
+        if (!controller.signal.aborted) {
+          setScan((current) => current ?? response.items[0] ?? null);
+        }
+      })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(normalizeError(reason));
       });

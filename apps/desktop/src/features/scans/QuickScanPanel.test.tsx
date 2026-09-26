@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiClient } from "../../services/api-client";
@@ -93,6 +93,29 @@ describe("QuickScanPanel", () => {
       expect(
         screen.getAllByRole("status").some((element) => element.textContent === "扫描已取消"),
       ).toBe(true);
+    });
+  });
+
+  it("does not replace a newly started scan with a late history response", async () => {
+    const api = client();
+    let resolveHistory!: (value: { items: ScanRecord[] }) => void;
+    const history = new Promise<{ items: ScanRecord[] }>((resolve) => { resolveHistory = resolve; });
+    vi.spyOn(api, "get").mockImplementation((path) =>
+      path === "/api/v1/scans" ? history : Promise.resolve({ ...record("running"), id: "new-scan" }),
+    );
+    vi.spyOn(api, "post").mockResolvedValue({ ...record("running"), id: "new-scan" });
+
+    render(<QuickScanPanel client={api} />);
+    fireEvent.click(screen.getByRole("button", { name: "开始扫描" }));
+    expect(await screen.findByRole("button", { name: "取消扫描" })).toBeInTheDocument();
+    await act(async () => {
+      resolveHistory({ items: [{ ...record("completed"), id: "old-scan" }] });
+      await history;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "取消扫描" })).toBeInTheDocument();
+      expect(screen.queryByText("扫描完成")).not.toBeInTheDocument();
     });
   });
 });

@@ -20,8 +20,22 @@ type ConnectionState =
   | { kind: "connected"; connection: BackendConnection }
   | { kind: "disconnected"; message: string; correlationId?: string };
 
-type WorkspaceView = "solve" | "history" | "advanced";
-type AdvancedTool = "scan" | "logs" | "settings" | "agent";
+type WorkspaceView = "diagnose" | "scan" | "logs" | "history" | "settings" | "agent" | "updates";
+
+const WORKSPACES: Array<{
+  id: WorkspaceView;
+  label: string;
+  description: string;
+  group: "常用" | "详细检查" | "管理";
+}> = [
+  { id: "diagnose", label: "问题诊断", description: "描述现象，查看证据与建议", group: "常用" },
+  { id: "scan", label: "设备扫描", description: "查看此刻的设备状态", group: "常用" },
+  { id: "history", label: "记录与报告", description: "回看结果与审计记录", group: "常用" },
+  { id: "logs", label: "事件日志", description: "分析崩溃与系统事件", group: "详细检查" },
+  { id: "agent", label: "受限 Agent", description: "运行指定的只读工具", group: "详细检查" },
+  { id: "settings", label: "模型与隐私", description: "设置供应商与数据边界", group: "管理" },
+  { id: "updates", label: "应用更新", description: "检查签名更新", group: "管理" },
+];
 
 function StatusMark({ state }: { state: ConnectionState["kind"] }) {
   return <span className={`status-mark status-mark--${state}`} aria-hidden="true" />;
@@ -30,8 +44,10 @@ function StatusMark({ state }: { state: ConnectionState["kind"] }) {
 export function App() {
   const [state, setState] = useState<ConnectionState>({ kind: "starting" });
   const [attempt, setAttempt] = useState(0);
-  const [view, setView] = useState<WorkspaceView>("solve");
-  const [advancedTool, setAdvancedTool] = useState<AdvancedTool>("scan");
+  const [view, setView] = useState<WorkspaceView>("diagnose");
+  const currentWorkspace = WORKSPACES.find((item) => item.id === view) ?? {
+    id: "diagnose", label: "问题诊断", description: "描述现象，查看证据与建议", group: "常用",
+  };
 
   const reconnect = useCallback(() => {
     setState({ kind: "starting" });
@@ -42,7 +58,7 @@ export function App() {
       .catch(() => {
         setState({
           kind: "disconnected",
-          message: "无法重新启动本地后端，请重启应用并检查开发环境。",
+          message: "无法重新启动本地服务。请重新打开应用；若问题持续，请记录错误信息以便排查。",
         });
       });
   }, []);
@@ -78,8 +94,12 @@ export function App() {
   }, [attempt]);
 
   return (
-    <main className="app-shell">
+    <div className="app-shell">
       <header className="topbar">
+        <div className="brand-lockup" aria-label="SysMind AI">
+          <span className="brand-symbol" aria-hidden="true">S</span>
+          <span>SysMind AI</span>
+        </div>
         <div className={`connection-chip connection-chip--${state.kind}`} role="status">
           <StatusMark state={state.kind} />
           {state.kind === "connected"
@@ -91,88 +111,49 @@ export function App() {
       </header>
 
       {state.kind === "connected" ? (
-        <section className="dashboard" aria-labelledby="workspace-title">
-          <div className="dashboard-intro">
-            <div>
-              <h1 id="workspace-title">设备概览</h1>
-              <p>先说出你遇到的现象，SysMind 会检查证据并告诉你下一步怎么做。</p>
-            </div>
-            <dl className="connection-details">
-              <div>
-                <dt>本地后端</dt>
-                <dd>{state.connection.health.backend_version}</dd>
-              </div>
-              <div>
-                <dt>API</dt>
-                <dd>{state.connection.health.api_version}</dd>
-              </div>
-              <div>
-                <dt>网络边界</dt>
-                <dd>127.0.0.1</dd>
-              </div>
-            </dl>
-          </div>
-          <PanelErrorBoundary name="更新"><UpdatePanel /></PanelErrorBoundary>
-          <nav className="workspace-nav" aria-label="主要功能">
-            <button
-              type="button"
-              aria-current={view === "solve" ? "page" : undefined}
-              onClick={() => setView("solve")}
-            >
-              解决电脑问题
-              <small>从描述现象开始</small>
-            </button>
-            <button
-              type="button"
-              aria-current={view === "history" ? "page" : undefined}
-              onClick={() => setView("history")}
-            >
-              记录与报告
-              <small>回看检查结果</small>
-            </button>
-            <button
-              type="button"
-              aria-current={view === "advanced" ? "page" : undefined}
-              onClick={() => setView("advanced")}
-            >
-              高级工具
-              <small>手动扫描与设置</small>
-            </button>
-          </nav>
-
-          {view === "solve" && (
-            <PanelErrorBoundary name="问题诊断">
-              <DiagnosisPanel client={state.connection.client} />
-            </PanelErrorBoundary>
-          )}
-
-          {view === "history" && (
-            <PanelErrorBoundary name="记录与报告">
-              <HistoryPanel client={state.connection.client} />
-            </PanelErrorBoundary>
-          )}
-
-          {view === "advanced" && (
-            <section className="advanced-workspace" aria-labelledby="advanced-title">
-              <header>
-                <div>
-                  <h2 id="advanced-title">高级工具</h2>
-                  <p>通常不需要手动使用这些功能。需要更详细的检查或配置时再进入。</p>
+        <div className="desktop-layout">
+          <aside className="workspace-sidebar" aria-label="工作台导航">
+            <nav aria-label="主要功能">
+              {(["常用", "详细检查", "管理"] as const).map((group) => (
+                <div className="nav-group" key={group}>
+                  <p>{group}</p>
+                  {WORKSPACES.filter((item) => item.group === group).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-current={view === item.id ? "page" : undefined}
+                      onClick={() => setView(item.id)}
+                    >
+                      <strong>{item.label}</strong>
+                      <small>{item.description}</small>
+                    </button>
+                  ))}
                 </div>
-              </header>
-              <div className="advanced-tool-switcher" role="group" aria-label="选择高级工具">
-                <button type="button" aria-pressed={advancedTool === "scan"} onClick={() => setAdvancedTool("scan")}>设备扫描</button>
-                <button type="button" aria-pressed={advancedTool === "logs"} onClick={() => setAdvancedTool("logs")}>事件日志</button>
-                <button type="button" aria-pressed={advancedTool === "settings"} onClick={() => setAdvancedTool("settings")}>模型与隐私</button>
-                <button type="button" aria-pressed={advancedTool === "agent"} onClick={() => setAdvancedTool("agent")}>开发者 Agent</button>
-              </div>
-              {advancedTool === "scan" && <PanelErrorBoundary name="设备扫描"><QuickScanPanel client={state.connection.client} /></PanelErrorBoundary>}
-              {advancedTool === "logs" && <PanelErrorBoundary name="事件日志"><LogAnalysisPanel client={state.connection.client} /></PanelErrorBoundary>}
-              {advancedTool === "settings" && <PanelErrorBoundary name="模型与隐私"><SettingsPanel client={state.connection.client} /></PanelErrorBoundary>}
-              {advancedTool === "agent" && <PanelErrorBoundary name="开发者 Agent"><AgentTaskPanel client={state.connection.client} /></PanelErrorBoundary>}
-            </section>
-          )}
-        </section>
+              ))}
+            </nav>
+            <details className="runtime-disclosure">
+              <summary>本地运行信息</summary>
+              <dl>
+                <div><dt>后端版本</dt><dd>{state.connection.health.backend_version}</dd></div>
+                <div><dt>API 版本</dt><dd>{state.connection.health.api_version}</dd></div>
+                <div><dt>监听地址</dt><dd>127.0.0.1</dd></div>
+              </dl>
+            </details>
+          </aside>
+          <main className="dashboard" aria-labelledby="workspace-title">
+            <div className="workspace-intro">
+              <h1 id="workspace-title">{currentWorkspace.label}</h1>
+              <p>{currentWorkspace.description}</p>
+            </div>
+            {view === "diagnose" && <PanelErrorBoundary name="问题诊断"><DiagnosisPanel client={state.connection.client} /></PanelErrorBoundary>}
+            {view === "scan" && <PanelErrorBoundary name="设备扫描"><QuickScanPanel client={state.connection.client} /></PanelErrorBoundary>}
+            {view === "history" && <PanelErrorBoundary name="记录与报告"><HistoryPanel client={state.connection.client} /></PanelErrorBoundary>}
+            {view === "logs" && <PanelErrorBoundary name="事件日志"><LogAnalysisPanel client={state.connection.client} /></PanelErrorBoundary>}
+            {view === "agent" && <PanelErrorBoundary name="受限 Agent"><AgentTaskPanel client={state.connection.client} /></PanelErrorBoundary>}
+            {view === "settings" && <PanelErrorBoundary name="模型与隐私"><SettingsPanel client={state.connection.client} /></PanelErrorBoundary>}
+            {view === "updates" && <PanelErrorBoundary name="应用更新"><UpdatePanel /></PanelErrorBoundary>}
+          </main>
+        </div>
       ) : (
         <section className="workspace" aria-labelledby="workspace-title">
           <div className="intro">
@@ -210,6 +191,6 @@ export function App() {
         </section>
       )}
 
-    </main>
+    </div>
   );
 }

@@ -190,13 +190,56 @@ describe("DiagnosisPanel", () => {
       report: null,
       completed_at: null,
     };
-    vi.spyOn(client, "get").mockResolvedValue({ items: [running] });
+    vi.spyOn(client, "get").mockImplementation((path) =>
+      Promise.resolve(path.endsWith(`/diagnoses/${running.id}`) ? running : { items: [running] }),
+    );
     render(<DiagnosisPanel client={client} />);
 
-    fireEvent.change(await screen.findByLabelText("查看以前的问题"), {
-      target: { value: running.id },
-    });
-    expect(screen.getByText("检查当前内存压力")).toBeInTheDocument();
+    expect(await screen.findByText("检查当前内存压力")).toBeInTheDocument();
+  });
+
+  it("restores an unfinished diagnosis when the panel mounts again", async () => {
+    const client = api();
+    const running: Diagnosis = {
+      ...report("diagnosis-restarted-view"),
+      status: "running",
+      current_step: "检查当前内存压力",
+      progress: 40,
+      report: null,
+      completed_at: null,
+    };
+    vi.spyOn(client, "get").mockImplementation((path) =>
+      Promise.resolve(path.endsWith(`/diagnoses/${running.id}`) ? running : { items: [running] }),
+    );
+
+    render(<DiagnosisPanel client={client} />);
+
+    expect(await screen.findByText("检查当前内存压力")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "取消诊断" })).toBeInTheDocument();
+  });
+
+  it("shows the latest finished report after returning to the diagnosis page", async () => {
+    const client = api();
+    vi.spyOn(client, "get").mockResolvedValue({ items: [report("diagnosis-finished-away")] });
+
+    render(<DiagnosisPanel client={client} />);
+
+    expect(await screen.findByText("已有本机证据支持以下结论。")).toBeInTheDocument();
+  });
+
+  it("renders a structured evidence summary as readable measurements", async () => {
+    const client = api();
+    const cpuReport = report("diagnosis-structured-evidence");
+    cpuReport.report!.findings[0]!.evidence_details![0]!.key_fields = {
+      "$": { model: "Fixture CPU", utilization_percent: 92, physical_cores: 8 },
+    };
+    vi.spyOn(client, "get").mockResolvedValue({ items: [cpuReport] });
+
+    render(<DiagnosisPanel client={client} />);
+
+    expect(await screen.findByText(/使用率 92%/)).toBeInTheDocument();
+    expect(screen.getByText(/物理核心 8/)).toBeInTheDocument();
+    expect(screen.queryByText(/\{"model"/)).not.toBeInTheDocument();
   });
 
   it("continues the same diagnosis after supplemental user input", async () => {

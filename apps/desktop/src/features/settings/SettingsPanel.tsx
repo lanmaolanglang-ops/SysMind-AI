@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ApiClient } from "../../services/api-client";
 import {
@@ -18,6 +18,10 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [retentionDays, setRetentionDays] = useState(30);
+  const [savedRetentionDays, setSavedRetentionDays] = useState<number | null>(null);
+  const endpointEdited = useRef(false);
+  const modelEdited = useRef(false);
+  const retentionEdited = useRef(false);
   const [cleanupArmed, setCleanupArmed] = useState(false);
   const [clearCredentialArmed, setClearCredentialArmed] = useState(false);
 
@@ -25,9 +29,10 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
     const controller = new AbortController();
     void getProviderSettings(client, controller.signal)
       .then((value) => {
+        if (controller.signal.aborted) return;
         setSettings(value);
-        if (value.endpoint) setEndpoint(value.endpoint);
-        if (value.model) setModel(value.model);
+        if (value.endpoint && !endpointEdited.current) setEndpoint(value.endpoint);
+        if (value.model && !modelEdited.current) setModel(value.model);
       })
       .catch(() => {
         if (!controller.signal.aborted) setMessage("暂时无法读取模型设置。");
@@ -38,7 +43,11 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     const controller = new AbortController();
     void getRetention(client, controller.signal)
-      .then((value) => setRetentionDays(value.retention_days))
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        setSavedRetentionDays(value.retention_days);
+        if (!retentionEdited.current) setRetentionDays(value.retention_days);
+      })
       .catch(() => { if (!controller.signal.aborted) setMessage("暂时无法读取数据保留策略。"); });
     return () => controller.abort();
   }, [client]);
@@ -92,8 +101,12 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
 
   const saveDataPolicy = () => {
     setBusy(true);
-    void saveRetention(client, retentionDays)
-      .then(() => setMessage(`保留策略已保存：已结束的只读历史保留 ${retentionDays} 天。`))
+    const submittedDays = retentionDays;
+    void saveRetention(client, submittedDays)
+      .then((value) => {
+        setSavedRetentionDays(value.retention_days);
+        setMessage(`保留策略已保存：已结束的只读历史保留 ${value.retention_days} 天。`);
+      })
       .catch(() => setMessage("保留策略未保存，请输入 7–3650 天。"))
       .finally(() => setBusy(false));
   };
@@ -127,8 +140,8 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
         </div>
       )}
       <div className="settings-grid">
-        <label>服务地址<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} /></label>
-        <label>模型名称<input value={model} onChange={(event) => setModel(event.target.value)} /></label>
+        <label>服务地址<input value={endpoint} onChange={(event) => { endpointEdited.current = true; setEndpoint(event.target.value); }} /></label>
+        <label>模型名称<input value={model} onChange={(event) => { modelEdited.current = true; setModel(event.target.value); }} /></label>
         <label>访问密钥<input type="password" autoComplete="off" value={apiKey} placeholder={settings?.configured ? "已安全保存；留空表示不替换" : "只在保存时短暂使用"} onChange={(event) => setApiKey(event.target.value)} /></label>
       </div>
       <div className="settings-actions">
@@ -146,7 +159,7 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
       {message && <p role="status" className="diagnosis-message">{message}</p>}
       <div className="retention-settings">
         <div><strong>本地历史保留</strong><p>只清理已结束的扫描、日志和未关联动作的诊断；动作与恢复审计始终保留。</p></div>
-        <label>天数<input type="number" min="7" max="3650" value={retentionDays} onChange={(event) => { const parsed = Number(event.target.value); setRetentionDays(Number.isFinite(parsed) ? parsed : 0); }} /></label>
+        <label>天数<input type="number" min="7" max="3650" value={retentionDays} onChange={(event) => { const parsed = Number(event.target.value); retentionEdited.current = true; setRetentionDays(Number.isFinite(parsed) ? parsed : 0); setCleanupArmed(false); }} /></label>
         <div className="settings-actions">
           <button type="button" onClick={saveDataPolicy} disabled={busy || !Number.isFinite(retentionDays) || retentionDays < 7 || retentionDays > 3650}>保存策略</button>
           {cleanupArmed ? (
@@ -155,12 +168,13 @@ export function SettingsPanel({ client }: { client: ApiClient }) {
               <button type="button" onClick={() => setCleanupArmed(false)} disabled={busy}>取消</button>
             </>
           ) : (
-            <button type="button" onClick={() => setCleanupArmed(true)} disabled={busy}>立即清理</button>
+            <button type="button" onClick={() => setCleanupArmed(true)} disabled={busy || savedRetentionDays === null || retentionDays !== savedRetentionDays}>立即清理</button>
           )}
         </div>
+        {savedRetentionDays !== null && retentionDays !== savedRetentionDays && <p className="field-error">请先保存保留策略，再按已保存的天数清理。</p>}
         {cleanupArmed && (
           <p role="status" className="diagnosis-message">
-            将按当前保留策略清理已结束的扫描、日志和未关联动作的诊断。动作与恢复审计不会删除。此操作不可撤销。
+            将按已保存的 {savedRetentionDays} 天保留策略清理已结束的扫描、日志和未关联动作的诊断。动作与恢复审计不会删除。此操作不可撤销。
           </p>
         )}
       </div>
