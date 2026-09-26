@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { ApiClient } from "../../services/api-client";
+import { formatLocalTimestamp } from "../../services/time";
 import { ControlledActions } from "./ControlledActions";
 import {
   cancelDiagnosis,
@@ -102,7 +103,7 @@ function EvidenceSummary({ details }: { details: EvidenceDetail[] }) {
           <strong>{TOOL_LABELS[detail.tool_name] ?? "本机只读检查"}</strong>
           <time dateTime={detail.observed_at ?? undefined}>
             {detail.observed_at
-              ? new Date(detail.observed_at).toLocaleString("zh-CN")
+              ? formatLocalTimestamp(detail.observed_at)
               : "检查时间未记录"}
           </time>
           <dl>
@@ -285,7 +286,7 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
             <option value="" disabled>选择一份以前的报告</option>
             {history.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.user_question} · {new Date(item.created_at).toLocaleString("zh-CN")}
+                {item.user_question} · {formatLocalTimestamp(item.created_at)}
               </option>
             ))}
           </select>

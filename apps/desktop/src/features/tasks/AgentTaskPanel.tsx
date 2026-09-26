@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApiClientError, type ApiClient, type SseEvent } from "../../services/api-client";
+import { formatLocalTime } from "../../services/time";
 import {
   cancelAgentTask,
   agentTaskReconnectDelay,
@@ -260,7 +261,7 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
               {events.map((event, index) => (
                 <li key={event.id ?? `${event.event}-${index}`}>
                   <span>{eventCopy(event)}</span>
-                  <time>{new Date(event.data.created_at).toLocaleTimeString("zh-CN")}</time>
+                  <time>{formatLocalTime(event.data.created_at)}</time>
                 </li>
               ))}
             </ol>

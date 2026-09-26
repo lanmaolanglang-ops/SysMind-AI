@@ -5,6 +5,7 @@ import { recentActions } from "../../services/actions";
 import { recentDiagnoses } from "../../services/diagnoses";
 import { getRecentLogAnalyses } from "../../services/log-analyses";
 import { getRecentScans } from "../../services/scans";
+import { formatLocalTimestamp } from "../../services/time";
 import {
   deleteHistory,
   getBaseline,
@@ -141,7 +142,7 @@ export function HistoryPanel({ client }: { client: ApiClient }) {
       {!error && !loading && visible.length === 0 && <p>暂无数据。先运行一次扫描或诊断。</p>}
       <ul className="history-list">{visible.map((item) => <li key={`${item.kind}-${item.id}`}>
         <div><strong>{item.title}</strong><small>{kindLabels[item.kind]}</small><details className="history-technical"><summary>记录编号</summary><code>{item.id}</code></details></div>
-        <span>{statusLabels[item.status] ?? "状态未知"}{item.timestamp ? ` · ${new Date(item.timestamp).toLocaleString("zh-CN")}` : ""}</span>
+        <span>{statusLabels[item.status] ?? "状态未知"}{item.timestamp ? ` · ${formatLocalTimestamp(item.timestamp)}` : ""}</span>
         {item.kind === "action" ? <small>强制保留审计</small> : <button type="button" onClick={() => previewDeletion(item)} disabled={busyId !== null}>删除…</button>}
       </li>)}</ul>
     </section>
