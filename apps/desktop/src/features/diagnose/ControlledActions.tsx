@@ -110,10 +110,28 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   };
 
   const load = () => {
+    if (locked) {
+      setMessage("正在处理上一步，请稍候。");
+      return;
+    }
     setBusy(true);
+    setMessage(null);
     void actionCandidates(client, diagnosisId)
-      .then((result) => setCandidates(result.items))
-      .catch(() => setMessage("此报告没有可用的当前用户启动项修复证据。"))
+      .then((result) => {
+        const items = result.items ?? [];
+        setCandidates(items);
+        setMessage(
+          items.length === 0 ? "当前没有可安全处理的启动项。" : null,
+        );
+      })
+      .catch((error: unknown) => {
+        setCandidates([]);
+        setMessage(
+          error instanceof ApiClientError
+            ? error.message
+            : "无法读取启动项，请稍后重试。",
+        );
+      })
       .finally(() => setBusy(false));
   };
 

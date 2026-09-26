@@ -177,7 +177,28 @@ class FakeDiagnosisPlanner:
                 "ask_user",
                 "请说明具体症状、发生场景和大致时间，例如开机后卡顿、无法上网或某个软件闪退。",
             )
-        if any(word in normalized for word in ("网络", "联网", "上网", "dns", "ping", "代理")):
+        if any(
+            word in normalized
+            for word in (
+                "网络",
+                "联网",
+                "上网",
+                "断网",
+                "外网",
+                "dns",
+                "ping",
+                "代理",
+                "网关",
+                "wifi",
+                "wi-fi",
+                "internet",
+                "ipv6",
+                "ipv4",
+                "网速",
+                "打不开网页",
+                "连不上",
+            )
+        ):
             payload = PlanPayload(
                 problem_category="network",
                 confidence=0.9,

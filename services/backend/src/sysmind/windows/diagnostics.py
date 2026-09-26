@@ -312,6 +312,10 @@ class WindowsSystemProbe:
 
 
 class WindowsProcessProbe:
+    # Leave headroom under the tool timeout (8s) so partial results can be returned
+    # instead of the whole snapshot being discarded as a timeout.
+    _COLLECTION_BUDGET_SECONDS = 6.5
+
     @staticmethod
     def _read_process(process: psutil.Process) -> ProcessInfo | None:
         try:
@@ -347,6 +351,41 @@ class WindowsProcessProbe:
         else:
             time.sleep(sample_seconds)
 
+    def _collect(
+        self,
+        limit: int,
+        cancel_event: Event | None,
+        sample_seconds: float,
+    ) -> tuple[list[ProcessInfo], bool]:
+        """Return ``(items, complete)``.
+
+        A slow or denied process must not discard already-collected rows. When the
+        collection budget is exhausted the partial snapshot is returned and
+        ``complete`` is False so callers can surface "partial" instead of empty.
+        """
+        deadline = time.monotonic() + self._COLLECTION_BUDGET_SECONDS
+        try:
+            enumerated = tuple(psutil.process_iter())
+        except (psutil.Error, OSError):
+            return [], False
+        processes = self._prime(enumerated)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            self._wait(cancel_event, min(sample_seconds, remaining))
+        items: list[ProcessInfo] = []
+        complete = True
+        for process in processes:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ToolCancelledError("Process sampling was cancelled.")
+            if time.monotonic() >= deadline:
+                complete = False
+                break
+            item = self._read_process(process)
+            if item is not None:
+                items.append(item)
+        items.sort(key=lambda item: (item.memory_bytes, item.cpu_percent), reverse=True)
+        return items[:limit], complete
+
     def snapshot(
         self,
         limit: int = 200,
@@ -354,11 +393,8 @@ class WindowsProcessProbe:
         *,
         sample_seconds: float = 0.15,
     ) -> Sequence[ProcessInfo]:
-        processes = self._prime(tuple(psutil.process_iter()))
-        self._wait(cancel_event, sample_seconds)
-        items = [item for process in processes if (item := self._read_process(process))]
-        items.sort(key=lambda item: (item.memory_bytes, item.cpu_percent), reverse=True)
-        return tuple(items[:limit])
+        items, _complete = self._collect(limit, cancel_event, sample_seconds)
+        return tuple(items)
 
     def high_usage(
         self,
@@ -369,9 +405,7 @@ class WindowsProcessProbe:
         memory_threshold: float = 10.0,
         limit: int = 20,
     ) -> Sequence[ProcessInfo]:
-        processes = self._prime(tuple(psutil.process_iter()))
-        self._wait(cancel_event, sample_seconds)
-        items = [item for process in processes if (item := self._read_process(process))]
+        items, _complete = self._collect(limit, cancel_event, sample_seconds)
         matches = [
             item
             for item in items
