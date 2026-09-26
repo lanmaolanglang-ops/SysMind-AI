@@ -279,11 +279,15 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
           <select
             value={diagnosis?.id ?? ""}
             onChange={(event) => {
+              if (!event.target.value) {
+                setDiagnosis(null);
+                return;
+              }
               const selected = history.find((item) => item.id === event.target.value);
               if (selected) setDiagnosis(selected);
             }}
           >
-            <option value="" disabled>选择一份以前的报告</option>
+            <option value="">选择一份以前的报告</option>
             {history.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.user_question} · {formatLocalTimestamp(item.created_at)}
@@ -506,12 +510,13 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
                   <p>当前没有适合由 SysMind 直接执行的安全操作。请先按报告建议检查，处理后可重新诊断；需要协助时可以保存一份易读报告交给技术人员。</p>
                 </section>
               )}
+              <div className="report-actions">
+                <button type="button" onClick={() => exportReport("markdown")}>保存易读报告</button>
+                <button type="button" onClick={() => exportReport("json")}>保存技术数据</button>
+              </div>
               <details className="technical-details report-save-options">
-                <summary>保存或查看完整技术报告</summary>
-                <div className="report-actions">
-                  <button type="button" onClick={() => exportReport("markdown")}>保存易读报告</button>
-                  <button type="button" onClick={() => exportReport("json")}>保存技术数据</button>
-                </div>
+                <summary>查看完整技术报告说明</summary>
+                <p>易读报告适合交给技术人员；技术数据为 JSON，便于进一步分析。文件会保存到本机下载目录。</p>
               </details>
               <div className="report-feedback">
                 <span>这份报告有帮助吗？</span>

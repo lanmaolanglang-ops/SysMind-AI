@@ -668,10 +668,18 @@ h1 {
 }
 
 .advanced-tool-switcher {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 18px;
+}
+
+.advanced-tool-switcher button {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
 }
 
 .advanced-tool-switcher button,

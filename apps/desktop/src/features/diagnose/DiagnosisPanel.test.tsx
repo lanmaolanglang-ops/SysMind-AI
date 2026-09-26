@@ -123,6 +123,8 @@ describe("DiagnosisPanel", () => {
     expect(screen.getByText("已有本机证据支持以下结论。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "保存易读报告" })).toBeInTheDocument();
     expect(screen.getByText("判断把握较高")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("查看以前的问题"), { target: { value: "" } });
+    expect(screen.queryByRole("heading", { name: "发现的问题" })).not.toBeInTheDocument();
   });
 
   it("starts a natural-language diagnosis and discloses bounded network traffic", async () => {
