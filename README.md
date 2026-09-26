@@ -5,6 +5,8 @@ SysMind AI is a local-first Windows diagnostic assistant for ordinary users. The
 RC2 has also been exercised as an unsigned Local Validation Build on one Windows 11 x64 device,
 including real diagnosis tools, fresh-data startup, bundled-backend lifecycle, silent install, and
 data-preserving uninstall. This is single-device evidence, not a signed production-release claim.
+The current development source and local validation installer use version 0.1.1; this is not a
+signed public release.
 
 The product and architecture baseline is [docs/SysMind-AI-PRD-and-Architecture.md](docs/SysMind-AI-PRD-and-Architecture.md).
 
@@ -40,7 +42,7 @@ Tauri 2 process owner ───── starts/stops ───── Python FastAP
 
 The Tauri process owns the exact child process it creates. On Windows, the child is assigned to a Job Object with `KILL_ON_JOB_CLOSE`; normal exit first requests graceful backend shutdown and only terminates that owned child after a timeout. A development launcher uses Python today and the same abstraction accepts a frozen executable later.
 
-## Current v0.1.0-preview capabilities
+## Current capabilities
 
 - Start, monitor, cancel, and revisit a local quick scan.
 - Collect normalized OS, CPU, GPU, memory, fixed-volume, process snapshot, and high-usage process evidence.
@@ -224,7 +226,7 @@ disposable Windows Sandbox/VM that satisfies the dual safety gate documented in
 An unsigned package is for local validation only:
 
 ```powershell
-.\scripts\package.ps1 -Version 0.1.0
+.\scripts\package.ps1 -Version 0.1.1
 ```
 
 The script runs quality gates, freezes and smoke-tests the backend without relying on system Python,

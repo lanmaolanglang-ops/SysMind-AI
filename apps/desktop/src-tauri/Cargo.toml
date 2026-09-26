@@ -1,6 +1,6 @@
 [package]
 name = "sysmind-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "SysMind AI desktop shell"
 authors = ["SysMind AI contributors"]
 edition = "2021"

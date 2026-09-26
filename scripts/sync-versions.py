@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -89,10 +90,17 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def replace_once(text: str, old: str, new: str, label: str) -> str:
-    if old not in text:
+def replace_package_version(text: str, product: str, label: str) -> str:
+    updated, count = re.subn(
+        r'^version = "[^"]+"$',
+        f'version = "{product}"',
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if count != 1:
         raise SystemExit(f"Could not find {label!r} while syncing versions.")
-    return text.replace(old, new, 1)
+    return updated
 
 
 def sync(check: bool) -> int:
@@ -127,24 +135,14 @@ def sync(check: bool) -> int:
     if f'version = "{product}"' not in cargo.split("[dependencies]", 1)[0]:
         drifted.append(str(CARGO_TOML_PATH.relative_to(REPOSITORY_ROOT)))
         if not check:
-            cargo = replace_once(
-                cargo,
-                'version = "0.1.0"',
-                f'version = "{product}"',
-                "Cargo.toml package version",
-            )
+            cargo = replace_package_version(cargo, product, "Cargo.toml package version")
             CARGO_TOML_PATH.write_text(cargo, encoding="utf-8", newline="\n")
 
     pyproject = read_text(BACKEND_PYPROJECT_PATH)
     if f'version = "{product}"' not in pyproject:
         drifted.append(str(BACKEND_PYPROJECT_PATH.relative_to(REPOSITORY_ROOT)))
         if not check:
-            pyproject = replace_once(
-                pyproject,
-                'version = "0.1.0"',
-                f'version = "{product}"',
-                "pyproject package version",
-            )
+            pyproject = replace_package_version(pyproject, product, "pyproject package version")
             BACKEND_PYPROJECT_PATH.write_text(pyproject, encoding="utf-8", newline="\n")
 
     for package_path in (DESKTOP_PACKAGE_PATH, ROOT_PACKAGE_PATH):

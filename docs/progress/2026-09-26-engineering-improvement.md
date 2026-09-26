@@ -63,3 +63,12 @@
 - 在一次性 Windows Sandbox/VM 中运行 scripts/run-phase5a-isolated-tests.ps1 -ConfirmIsolatedEnvironment，复核目标变化拒绝、停用/恢复、正常/强制关闭及审计；再用 scripts/run-phase6-isolated-tests.ps1 -InstallerPath <安装包路径> -ConfirmIsolatedEnvironment 做安装/卸载。隔离要求见 tests/integration/README.md。目前 BLOCKED。
 - 在专用测试凭据环境中验证在线供应商连接、流式断流/限流与恢复；在受保护发布环境提供签名输入后验证真实更新及坏签名拒绝。目前 BLOCKED。
 - 2026-09-22 已存在的打包产物精确备份在 .sysmind-data/validation-20260926/package-before-20260926；新包和备份均保留。下一项执行工作是上述隔离环境与真实凭据验收，随后再决定签名发布候选。
+
+## 本机旧版替换与 0.1.1 版本标识（2026-09-26）
+
+- 用户明确授权删除本机 SysMind AI 的工作记录、配置和 API key，并以最新代码重装。替换前，当前用户安装为 0.1.0；桌面主程序 SHA-256 为 `b39707e7a9ee9f1598f65e11418948ba45a77a4f950b0779eccf4c8e4d9d6bcf`。`%LOCALAPPDATA%\ai.sysmind.desktop` 含 SQLite 与 WebView 数据，Windows 凭据管理器存在固定目标 `SysMindAI/provider.api_key`；未读取凭据值。
+- 源码基于 `c6c2cb87e1114d823296e7c04976f867644bd2f1`，将产品版本统一升至 0.1.1，API 协议维持 1.0。打包前检查：Ruff、MyPy、前端 lint/typecheck/build、Rust fmt 均 PASS；后端 pytest 223 PASS、4 SKIPPED，前端 Vitest 47 PASS，Rust 16 PASS。冻结后端 smoke PASS。
+- 首次桌面生命周期测试因在数据库迁移完成前记录数据目录状态而误报 FAIL；同一次运行中的迁移及数据库创建已 PASS。修正测试取样顺序后，针对性重跑与完整本地打包复跑均 PASS（单实例、崩溃存活、sidecar 退出清理等）。
+- 0.1.1 未签名本地安装包：`apps/desktop/src-tauri/target/release/bundle/nsis/SysMind AI_0.1.1_x64-setup.exe`，SHA-256 `cc80c8801e638bd5d86c7a3d3a9a0bea421396d6e107fb73f73f919e3dae189d`，与 `SHA256SUMS.json` 一致。
+- 旧版静默卸载 PASS；直接删除应用数据目录的命令被自动执行审查拒绝，未执行。随后使用 0.1.1 安装器自带的交互式“删除应用程序数据”卸载选项完成清理，API key 用固定目标的 Windows Credential API 删除。最终重新安装 0.1.1：当前用户卸载登记为 0.1.1，后端可执行文件与本次构建 SHA-256 完全一致；桌面主程序与打包后工作区文件等长，仅 `__TAURI_BUNDLE_TYPE_VAR_` 的 3 字节安装包类型标记不同，其余字节一致。安装器签名状态为 NotSigned。
+- 最终核对：`%LOCALAPPDATA%\ai.sysmind.desktop`、`%APPDATA%\ai.sysmind.desktop`、固定 API key 目标均不存在；本次最终安装后未启动桌面程序，避免生成新的使用记录。此验收确认已知应用数据与凭据位置已清空，不代替一次性 Windows 10/11 发布矩阵、签名验收或系统级取证清除。

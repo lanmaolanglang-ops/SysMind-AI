@@ -79,5 +79,5 @@ jobs:
       - run: python -m venv services/backend/.venv
       - run: services/backend/.venv/Scripts/python.exe -m pip install -e "services/backend[dev,packaging]"
       - run: pnpm install --frozen-lockfile
-      - run: .\scripts\package.ps1 -Version 0.1.0 -SkipChecks
-      - run: .\scripts\run-phase6-isolated-tests.ps1 -InstallerPath "apps/desktop/src-tauri/target/release/bundle/nsis/SysMind AI_0.1.0_x64-setup.exe" -ConfirmIsolatedEnvironment
+      - run: .\scripts\package.ps1 -Version 0.1.1 -SkipChecks
+      - run: .\scripts\run-phase6-isolated-tests.ps1 -InstallerPath "apps/desktop/src-tauri/target/release/bundle/nsis/SysMind AI_0.1.1_x64-setup.exe" -ConfirmIsolatedEnvironment

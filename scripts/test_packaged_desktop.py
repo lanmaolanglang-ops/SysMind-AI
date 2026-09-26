@@ -170,8 +170,8 @@ def main() -> None:
         wait_for_backend_ready(backend)
         try:
             database_path = data_directory / "sysmind.db"
-            results["data_directory_created"] = data_directory.is_dir()
             results["database_migrated_to_head"] = wait_for_database_head(database_path)
+            results["data_directory_created"] = data_directory.is_dir()
             results["database_created"] = database_path.is_file()
             command_line = backend.cmdline() or []
             session_token = (backend.environ() or {}).get("SYSMIND_SESSION_TOKEN", "")
