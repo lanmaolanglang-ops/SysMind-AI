@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiClientError, type ApiClient } from "../../services/api-client";
+import { Badge } from "../../ui/Badge";
+import { Button } from "../../ui/Button";
+import { EmptyState } from "../../ui/EmptyState";
+import { Notice } from "../../ui/Notice";
+import { Panel, PanelSection } from "../../ui/Panel";
 import {
   cancelLogAnalysis,
   getLogAnalysis,
@@ -140,54 +145,63 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
   };
 
   return (
-    <section className="log-panel" aria-labelledby="log-analysis-title">
-      <div className="log-heading">
-        <div>
-          <h2 id="log-analysis-title">分析 Windows 事件日志</h2>
-          <p>仅查询选定通道和时间窗；保存脱敏摘要，不保存原始事件内容。</p>
-        </div>
-        <span className="sensitivity-label">只读 · 含敏感数据</span>
-      </div>
+    <Panel
+      titleId="log-analysis-title"
+      title="分析 Windows 事件日志"
+      description="仅查询选定通道和时间窗；保存脱敏摘要，不保存原始事件内容。"
+      badge={<Badge tone="warn">只读 · 含敏感数据</Badge>}
+    >
+      <div className="filters" aria-label="事件日志筛选条件">
+        <fieldset className="filters__group">
+          <legend className="field__label">通道</legend>
+          <div className="filters__options">
+            {(["Application", "System"] as LogChannel[]).map((channel) => (
+              <label className="option" key={channel}>
+                <input
+                  type="checkbox"
+                  checked={channels.includes(channel)}
+                  onChange={() => toggleChannel(channel)}
+                />
+                <span>{channel === "Application" ? "应用程序" : "系统"}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
-      <div className="log-filters" aria-label="事件日志筛选条件">
-        <fieldset>
-          <legend>通道</legend>
-          {(["Application", "System"] as LogChannel[]).map((channel) => (
-            <label key={channel}>
-              <input
-                type="checkbox"
-                checked={channels.includes(channel)}
-                onChange={() => toggleChannel(channel)}
-              />
-              {channel === "Application" ? "应用程序" : "系统"}
-            </label>
-          ))}
+        <fieldset className="filters__group">
+          <legend className="field__label">级别</legend>
+          <div className="filters__options">
+            {LEVELS.map((level) => (
+              <label className="option" key={level.value}>
+                <input
+                  type="checkbox"
+                  checked={levels.includes(level.value)}
+                  onChange={() => toggleLevel(level.value)}
+                />
+                <span>{level.label}</span>
+              </label>
+            ))}
+          </div>
         </fieldset>
-        <fieldset>
-          <legend>级别</legend>
-          {LEVELS.map((level) => (
-            <label key={level.value}>
-              <input
-                type="checkbox"
-                checked={levels.includes(level.value)}
-                onChange={() => toggleLevel(level.value)}
-              />
-              {level.label}
-            </label>
-          ))}
-        </fieldset>
-        <label className="filter-control">
-          时间范围
-          <select value={lookback} onChange={(event) => setLookback(Number(event.target.value))}>
+
+        <label className="field">
+          <span className="field__label">时间范围</span>
+          <select
+            className="control"
+            value={lookback}
+            onChange={(event) => setLookback(Number(event.target.value))}
+          >
             <option value={6}>最近 6 小时</option>
             <option value={24}>最近 24 小时</option>
             <option value={72}>最近 3 天</option>
             <option value={168}>最近 7 天</option>
           </select>
         </label>
-        <label className="filter-control">
-          事件 ID（可选）
+
+        <label className="field">
+          <span className="field__label">事件 ID（可选）</span>
           <input
+            className="control"
             value={eventIds}
             onChange={(event) => setEventIds(event.target.value)}
             placeholder="例如 1000, 1001"
@@ -195,92 +209,136 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
         </label>
       </div>
 
-      {error && <div className="inline-error" role="alert">{error}</div>}
+      {error && (
+        <Notice tone="danger" role="alert" className="panel__notice">
+          {error}
+        </Notice>
+      )}
 
-      <div className="log-action-row">
+      <div className="action-row">
         {active && record ? (
           <>
-            <div className="log-progress" role="status">
-              <strong>{statusCopy(record)}</strong>
-              <progress value={record.progress} max="100" aria-label="日志分析进度" />
+            <div className="progress-row" role="status">
+              <div className="progress-row__label">
+                <strong>{statusCopy(record)}</strong>
+              </div>
+              <progress className="progress" value={record.progress} max="100" aria-label="日志分析进度" />
             </div>
-            <button className="text-action" type="button" onClick={cancel} disabled={busy}>
+            <Button variant="ghost" busy={busy} onClick={cancel} disabled={busy}>
               {busy ? "正在取消…" : "取消分析"}
-            </button>
+            </Button>
           </>
         ) : (
-          <button className="primary-action" type="button" onClick={start} disabled={busy}>
+          <Button variant="primary" busy={busy} onClick={start} disabled={busy}>
             {busy ? "正在创建…" : record ? "重新分析" : "开始分析"}
-          </button>
+          </Button>
         )}
       </div>
 
       {record && TERMINAL.has(record.status) && (
-        <div className="log-results">
-          <div className="result-status">
-            <div><strong>{statusCopy(record)}</strong></div>
-            {record.finished_at && <time>{formatTime(record.finished_at)}</time>}
+        <PanelSection>
+          <div className="result-head">
+            <span className="result-head__state">
+              <span
+                className={`dot dot--${record.status === "completed" ? "ok" : record.status === "partial" ? "warn" : "danger"}`}
+                aria-hidden="true"
+              />
+              <strong>{statusCopy(record)}</strong>
+            </span>
+            {record.finished_at && (
+              <time className="result-head__time">{formatTime(record.finished_at)}</time>
+            )}
           </div>
-          {record.summary && (
+
+          {record.summary ? (
             <>
-              <div className="section-heading">
-                <h3>应用崩溃聚合</h3>
-                <span>{record.summary.crash_groups.length} 组 · {record.summary.event_count} 条事件</span>
-              </div>
-              {record.summary.crash_groups.length ? (
-                <div className="crash-list">
-                  {record.summary.crash_groups.map((group) => (
-                    <div className="crash-row" key={`${group.application}-${group.faulting_module}-${group.exception_code}`}>
-                      <strong>{group.application}</strong>
-                      <span>{group.count} 次</span>
-                      <small>
-                        {group.faulting_module ?? "未知模块"}
-                        {group.exception_code ? ` · ${group.exception_code}` : ""}
-                      </small>
+              <PanelSection>
+                <div className="section-title">
+                  <h3>应用崩溃聚合</h3>
+                  <span>
+                    {record.summary.crash_groups.length} 组 · {record.summary.event_count} 条事件
+                  </span>
+                </div>
+                {record.summary.crash_groups.length ? (
+                  <div className="rows">
+                    {record.summary.crash_groups.map((group) => (
+                      <div
+                        className="crash-row"
+                        key={`${group.application}-${group.faulting_module}-${group.exception_code}`}
+                      >
+                        <strong>{group.application}</strong>
+                        <span className="row__meta">{group.count} 次</span>
+                        <small>
+                          {group.faulting_module ?? "未知模块"}
+                          {group.exception_code ? ` · ${group.exception_code}` : ""}
+                        </small>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="quiet">所选范围内未聚合到应用崩溃事件。</p>
+                )}
+              </PanelSection>
+
+              <PanelSection>
+                <div className="section-title">
+                  <h3>常见错误与警告</h3>
+                  <span>{record.summary.event_groups.length} 组</span>
+                </div>
+                <div className="rows">
+                  {record.summary.event_groups.slice(0, 10).map((group) => (
+                    <div
+                      className="crash-row"
+                      key={`${group.channel}-${group.provider}-${group.event_id}-${group.level}`}
+                    >
+                      <strong>{`${group.provider} · ID ${group.event_id}`}</strong>
+                      <span className="row__meta">{group.count} 次</span>
+                      <small>{`${group.channel} · ${group.sample_summary}`}</small>
                     </div>
                   ))}
                 </div>
-              ) : <p className="quiet-result">所选范围内未聚合到应用崩溃事件。</p>}
+              </PanelSection>
 
-              <div className="section-heading event-heading">
-                <h3>常见错误与警告</h3>
-                <span>{record.summary.event_groups.length} 组</span>
-              </div>
-              <div className="crash-list">
-                {record.summary.event_groups.slice(0, 10).map((group) => (
-                  <div className="crash-row" key={`${group.channel}-${group.provider}-${group.event_id}-${group.level}`}>
-                    <strong>{group.provider} · ID {group.event_id}</strong>
-                    <span>{group.count} 次</span>
-                    <small>{group.channel} · {group.sample_summary}</small>
+              <PanelSection>
+                <div className="section-title">
+                  <h3>脱敏事件证据</h3>
+                  <span>最多显示 20 条</span>
+                </div>
+                {record.summary.events.length ? (
+                  <div className="rows">
+                    {record.summary.events.slice(0, 20).map((item, index) => (
+                      <article
+                        className="event-row"
+                        key={`${item.channel}-${item.event_id}-${item.timestamp}-${index}`}
+                      >
+                        <div className="event-row__head">
+                          <strong>{item.provider}</strong>
+                          <span className="row__meta">
+                            {`${item.channel} · ID ${item.event_id} · ${formatTime(item.timestamp)}`}
+                          </span>
+                        </div>
+                        <p className="event-row__summary">{item.summary}</p>
+                      </article>
+                    ))}
                   </div>
-                ))}
-              </div>
-
-              <div className="section-heading event-heading">
-                <h3>脱敏事件证据</h3>
-                <span>最多显示 20 条</span>
-              </div>
-              <div className="event-list">
-                {record.summary.events.slice(0, 20).map((item, index) => (
-                  <article className="event-row" key={`${item.channel}-${item.event_id}-${item.timestamp}-${index}`}>
-                    <div>
-                      <strong>{item.provider}</strong>
-                      <span>{item.channel} · ID {item.event_id} · {formatTime(item.timestamp)}</span>
-                    </div>
-                    <p>{item.summary}</p>
-                  </article>
-                ))}
-              </div>
+                ) : (
+                  <EmptyState>所选范围内没有需要显示的脱敏事件。</EmptyState>
+                )}
+              </PanelSection>
             </>
-          )}
+          ) : null}
+
           {record.failures.length > 0 && (
-            <div className="scan-warnings">
-              <strong>部分查询未完成</strong>
-              <ul>{record.failures.map((failure) => <li key={failure.tool}>{failure.message}</li>)}</ul>
-            </div>
+            <Notice tone="warn" title="部分查询未完成" className="panel__notice">
+              <ul className="plain-list">
+                {record.failures.map((failure) => (
+                  <li key={failure.tool}>{failure.message}</li>
+                ))}
+              </ul>
+            </Notice>
           )}
-        </div>
+        </PanelSection>
       )}
-    </section>
+    </Panel>
   );
 }

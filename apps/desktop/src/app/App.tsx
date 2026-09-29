@@ -1,29 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { QuickScanPanel } from "../features/scans/QuickScanPanel";
-import { LogAnalysisPanel } from "../features/logs/LogAnalysisPanel";
-import { AgentTaskPanel } from "../features/tasks/AgentTaskPanel";
 import { DiagnosisPanel } from "../features/diagnose/DiagnosisPanel";
-import { UpdatePanel } from "../features/updates/UpdatePanel";
+import { LogAnalysisPanel } from "../features/logs/LogAnalysisPanel";
+import { QuickScanPanel } from "../features/scans/QuickScanPanel";
+import { SettingsView } from "../features/settings/SettingsView";
+import { AgentTaskPanel } from "../features/tasks/AgentTaskPanel";
 import {
   BackendConnectionError,
   connectToBackend,
   restartBackendLauncher,
   type BackendConnection,
 } from "../services/backend";
+import { ConnectionGate } from "./ConnectionGate";
+import { Sidebar } from "./Sidebar";
+import { Topbar } from "./Topbar";
+import { DEFAULT_VIEW, viewDefinition, type ViewId } from "./navigation";
 
 type ConnectionState =
   | { kind: "starting" }
   | { kind: "connected"; connection: BackendConnection }
   | { kind: "disconnected"; message: string; correlationId?: string };
 
-function StatusMark({ state }: { state: ConnectionState["kind"] }) {
-  return <span className={`status-mark status-mark--${state}`} aria-hidden="true" />;
-}
-
 export function App() {
   const [state, setState] = useState<ConnectionState>({ kind: "starting" });
   const [attempt, setAttempt] = useState(0);
+  const [view, setView] = useState<ViewId>(DEFAULT_VIEW);
 
   const reconnect = useCallback(() => {
     setState({ kind: "starting" });
@@ -69,84 +70,41 @@ export function App() {
     };
   }, [attempt]);
 
+  if (state.kind !== "connected") {
+    return <ConnectionGate state={state} onRetry={reconnect} />;
+  }
+
+  const definition = viewDefinition(view);
+  const { client } = state.connection;
+
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div className={`connection-chip connection-chip--${state.kind}`} role="status">
-          <StatusMark state={state.kind} />
-          {state.kind === "connected"
-            ? "本地服务已连接"
-            : state.kind === "starting"
-              ? "本地服务启动中"
-              : "本地服务未连接"}
-        </div>
-      </header>
+    <div className="shell">
+      <a className="skip-link" href="#main-content">
+        跳到主内容
+      </a>
+      <Sidebar view={view} onSelect={setView} connection={state.connection} />
 
-      {state.kind === "connected" ? (
-        <section className="dashboard" aria-labelledby="workspace-title">
-          <div className="dashboard-intro">
-            <div>
-              <h1 id="workspace-title">设备概览</h1>
-              <p>用一次可审计的只读扫描，建立这台 Windows 电脑的当前状态快照。</p>
+      <div className="workspace">
+        <Topbar definition={definition} connection={state.connection} />
+
+        <main className="content" id="main-content" tabIndex={-1}>
+          <p className="sr-only" role="status">
+            {definition.title}已打开
+          </p>
+          <div className="content__inner">
+            <div className="content__stack">
+              {/* Only the active section is mounted, so at most one collector
+                  polls or streams at a time. Each panel reloads the latest
+                  record from the backend when it mounts. */}
+              {view === "diagnose" && <DiagnosisPanel client={client} />}
+              {view === "scan" && <QuickScanPanel client={client} />}
+              {view === "logs" && <LogAnalysisPanel client={client} />}
+              {view === "runtime" && <AgentTaskPanel client={client} />}
+              {view === "settings" && <SettingsView connection={state.connection} />}
             </div>
-            <dl className="connection-details">
-              <div>
-                <dt>本地后端</dt>
-                <dd>{state.connection.health.backend_version}</dd>
-              </div>
-              <div>
-                <dt>API</dt>
-                <dd>{state.connection.health.api_version}</dd>
-              </div>
-              <div>
-                <dt>网络边界</dt>
-                <dd>127.0.0.1</dd>
-              </div>
-            </dl>
           </div>
-          <UpdatePanel />
-          <DiagnosisPanel client={state.connection.client} />
-          <QuickScanPanel client={state.connection.client} />
-          <LogAnalysisPanel client={state.connection.client} />
-          <AgentTaskPanel client={state.connection.client} />
-        </section>
-      ) : (
-        <section className="workspace" aria-labelledby="workspace-title">
-          <div className="intro">
-            <h1 id="workspace-title">正在准备</h1>
-            <p>安全启动本地服务后，即可进行只读系统扫描。所有结果默认保存在这台电脑上。</p>
-          </div>
-
-          <div className="runtime-panel">
-          {state.kind === "starting" && (
-            <div className="state-content" aria-live="polite">
-              <div className="activity-line" aria-hidden="true">
-                <span />
-              </div>
-              <h2>正在启动本地后端</h2>
-              <p>等待 FastAPI 完成数据库迁移和 readiness 检查。</p>
-            </div>
-          )}
-
-          {state.kind === "disconnected" && (
-            <div className="state-content state-content--error" role="alert">
-              <div className="state-heading">
-                <StatusMark state="disconnected" />
-                <h2>本地后端未连接</h2>
-              </div>
-              <p>{state.message}</p>
-              {state.correlationId && (
-                <p className="correlation-id">问题编号：{state.correlationId}</p>
-              )}
-              <button type="button" onClick={reconnect}>
-                重新连接
-              </button>
-            </div>
-          )}
-          </div>
-        </section>
-      )}
-
-    </main>
+        </main>
+      </div>
+    </div>
   );
 }

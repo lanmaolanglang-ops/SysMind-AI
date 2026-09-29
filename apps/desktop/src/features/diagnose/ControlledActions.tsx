@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import type { ApiClient } from "../../services/api-client";
+import { Button } from "../../ui/Button";
+import { Notice } from "../../ui/Notice";
 import {
   actionCandidates,
   confirmAndExecute,
@@ -50,7 +52,10 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   const plan = (candidate: StartupActionCandidate) => {
     setBusy(true);
     void createDisableAction(client, diagnosisId, candidate)
-      .then((result) => { setAction(result); setMessage(null); })
+      .then((result) => {
+        setAction(result);
+        setMessage(null);
+      })
       .catch(() => setMessage("目标状态已变化，请刷新后重新生成计划。"))
       .finally(() => setBusy(false));
   };
@@ -58,7 +63,10 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   const planProcess = (candidate: ProcessActionCandidate) => {
     setBusy(true);
     void createProcessCloseAction(client, diagnosisId, candidate)
-      .then((result) => { setAction(result); setMessage(null); })
+      .then((result) => {
+        setAction(result);
+        setMessage(null);
+      })
       .catch(() => setMessage("进程身份或窗口已经变化，请刷新后重新生成计划。"))
       .finally(() => setBusy(false));
   };
@@ -81,7 +89,10 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
     if (!original) return;
     setBusy(true);
     void createRecoveryAction(client, original.id)
-      .then((result) => { setAction(result); setMessage(null); })
+      .then((result) => {
+        setAction(result);
+        setMessage(null);
+      })
       .catch(() => setMessage("恢复资料不可用或目标位置已被占用。"))
       .finally(() => setBusy(false));
   };
@@ -90,7 +101,10 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
     if (!action || action.status !== "close_pending") return;
     setBusy(true);
     void createProcessTermination(client, action.id)
-      .then((result) => { setAction(result); setMessage(null); })
+      .then((result) => {
+        setAction(result);
+        setMessage(null);
+      })
       .catch(() => setMessage("进程身份已变化，不能创建强制终止计划。"))
       .finally(() => setBusy(false));
   };
@@ -108,68 +122,158 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   const isProcess = action?.tool_name === "process.request_close_current_user";
   const isTerminate = action?.tool_name === "process.terminate_current_user";
   const secondConfirmation = action?.status === "awaiting_second_confirmation";
+
+  const confirmLabel = isTerminate
+    ? secondConfirmation
+      ? "再次确认并强制终止"
+      : "我已了解数据丢失风险"
+    : `我已了解，确认${isProcess ? "请求关闭" : isRestore ? "恢复" : "禁用"}`;
+
   return (
-    <section className="controlled-actions" aria-labelledby={`actions-${diagnosisId}`}>
-      <div className="controlled-actions__heading">
+    <section className="repair" aria-labelledby={`actions-${diagnosisId}`}>
+      <div className="repair__head">
         <div>
           <h4 id={`actions-${diagnosisId}`}>受控修复</h4>
           <p>仅处理当前用户启动项或请求关闭有证据的 GUI 应用。每次操作都重新核验目标。</p>
         </div>
-        {!action && <div className="controlled-actions__buttons">
-          {!candidates && <button type="button" onClick={load} disabled={busy}>查看启动项</button>}
-          {!processes && <button type="button" onClick={loadProcesses} disabled={busy}>查看可关闭应用</button>}
-        </div>}
+        {!action && (
+          <div className="repair__actions">
+            {!candidates && (
+              <Button size="sm" busy={busy} onClick={load} disabled={busy}>
+                查看启动项
+              </Button>
+            )}
+            {!processes && (
+              <Button size="sm" busy={busy} onClick={loadProcesses} disabled={busy}>
+                查看可关闭应用
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {candidates && !action && (
-        <ul className="action-candidates">
-          {candidates.length === 0 && <li>当前没有可安全处理的启动项。</li>}
+        <ul className="candidates">
+          {candidates.length === 0 && <li className="quiet">当前没有可安全处理的启动项。</li>}
           {candidates.map((candidate) => (
             <li key={candidate.item_id}>
-              <div><strong>{candidate.name}</strong><small>{candidate.command_name ?? "命令不可用"} · {candidate.source_kind === "user_run" ? "当前用户 Run" : "当前用户 Startup"}</small></div>
-              <button type="button" onClick={() => plan(candidate)} disabled={busy}>生成禁用计划</button>
+              <span className="candidates__text">
+                <strong>{candidate.name}</strong>
+                <small>
+                  {candidate.command_name ?? "命令不可用"} ·{" "}
+                  {candidate.source_kind === "user_run" ? "当前用户 Run" : "当前用户 Startup"}
+                </small>
+              </span>
+              <Button size="sm" busy={busy} onClick={() => plan(candidate)} disabled={busy}>
+                生成禁用计划
+              </Button>
             </li>
           ))}
         </ul>
       )}
 
       {processes && !action && (
-        <ul className="action-candidates">
-          {processes.length === 0 && <li>当前没有符合保护策略的高占用 GUI 应用。</li>}
+        <ul className="candidates">
+          {processes.length === 0 && (
+            <li className="quiet">当前没有符合保护策略的高占用 GUI 应用。</li>
+          )}
           {processes.map((candidate) => (
             <li key={candidate.item_id}>
-              <div><strong>{candidate.name}</strong><small>CPU {candidate.cpu_percent}% · 内存 {candidate.memory_percent}%</small></div>
-              <button type="button" onClick={() => planProcess(candidate)} disabled={busy}>生成关闭请求</button>
+              <span className="candidates__text">
+                <strong>{candidate.name}</strong>
+                <small>
+                  CPU {candidate.cpu_percent}% · 内存 {candidate.memory_percent}%
+                </small>
+              </span>
+              <Button size="sm" busy={busy} onClick={() => planProcess(candidate)} disabled={busy}>
+                生成关闭请求
+              </Button>
             </li>
           ))}
         </ul>
       )}
 
       {action && (action.status === "proposed" || secondConfirmation) && (
-        <div className="confirmation-card" role="group" aria-label="操作确认">
-          <strong>{isTerminate ? "强制终止应用" : isProcess ? "请求关闭应用" : isRestore ? "恢复启动项" : "禁用启动项"}：{action.target_name}</strong>
-          <p>{isTerminate ? "强制终止不可恢复，未保存内容会丢失。该动作只因先前的正常关闭请求未完成而可用。" : isProcess ? "应用可能提示保存。SysMind 不会替你放弃未保存内容，也不会自动升级为强制终止。" : isRestore ? "恢复后，该程序可能在下次登录时自动启动。" : "禁用后，该程序不会在下次登录时自动启动；不会卸载或删除程序。"}</p>
-          <p className="confirmation-warning">执行前会再次比较目标身份。确认仅对这一项有效，并在 2 分钟后失效。{isProcess && " 关闭请求最多等待 8 秒。"}{isTerminate && (secondConfirmation ? " 这是第二次也是最终确认。" : " 需要再次确认后才会执行。")}</p>
-          <div>
-            <button type="button" className="primary-action" onClick={execute} disabled={busy}>{busy ? "正在验证…" : isTerminate ? (secondConfirmation ? "再次确认并强制终止" : "我已了解数据丢失风险") : `我已了解，确认${isProcess ? "请求关闭" : isRestore ? "恢复" : "禁用"}`}</button>
-            <button type="button" onClick={reject} disabled={busy}>拒绝并取消</button>
+        <div
+          className={`confirm ${isTerminate ? "confirm--danger" : "confirm--warn"}`}
+          role="group"
+          aria-label="操作确认"
+        >
+          <strong className="confirm__title">
+            {isTerminate ? "强制终止应用" : isProcess ? "请求关闭应用" : isRestore ? "恢复启动项" : "禁用启动项"}
+            ：{action.target_name}
+          </strong>
+          <p>
+            {isTerminate
+              ? "强制终止不可恢复，未保存内容会丢失。该动作只因先前的正常关闭请求未完成而可用。"
+              : isProcess
+                ? "应用可能提示保存。SysMind 不会替你放弃未保存内容，也不会自动升级为强制终止。"
+                : isRestore
+                  ? "恢复后，该程序可能在下次登录时自动启动。"
+                  : "禁用后，该程序不会在下次登录时自动启动；不会卸载或删除程序。"}
+          </p>
+          <p className="confirm__warning">
+            执行前会再次比较目标身份。确认仅对这一项有效，并在 2 分钟后失效。
+            {isProcess && " 关闭请求最多等待 8 秒。"}
+            {isTerminate &&
+              (secondConfirmation ? " 这是第二次也是最终确认。" : " 需要再次确认后才会执行。")}
+          </p>
+          <div className="confirm__actions">
+            <Button
+              variant={isTerminate ? "danger" : "primary"}
+              busy={busy}
+              onClick={execute}
+              disabled={busy}
+            >
+              {busy ? "正在验证…" : confirmLabel}
+            </Button>
+            <Button variant="ghost" onClick={reject} disabled={busy}>
+              拒绝并取消
+            </Button>
           </div>
         </div>
       )}
 
       {action && action.status !== "proposed" && !secondConfirmation && (
-        <div className={`action-result action-result--${action.status}`} role="status">
-          <strong>{action.status === "succeeded" ? (isTerminate ? "应用已强制终止并验证" : isProcess ? "应用已关闭并验证" : isRestore ? "启动项已恢复并验证" : "启动项已禁用并验证") : action.status === "close_pending" ? "应用未在 8 秒内关闭；尚未执行强制终止" : "操作未完成"}</strong>
-          {action.error_message && <p>{action.error_message}</p>}
-          {!isProcess && !isRestore && action.status === "succeeded" && action.recovery_available && (
-            <button type="button" onClick={prepareRecovery} disabled={busy}>生成恢复计划</button>
-          )}
-          {isProcess && action.status === "close_pending" && (
-            <button type="button" onClick={prepareTermination} disabled={busy}>生成强制终止计划</button>
-          )}
-        </div>
+        <Notice
+          tone={action.status === "succeeded" ? "ok" : "warn"}
+          role="status"
+          className="repair__result"
+          title={
+            action.status === "succeeded"
+              ? isTerminate
+                ? "应用已强制终止并验证"
+                : isProcess
+                  ? "应用已关闭并验证"
+                  : isRestore
+                    ? "启动项已恢复并验证"
+                    : "启动项已禁用并验证"
+              : action.status === "close_pending"
+                ? "应用未在 8 秒内关闭；尚未执行强制终止"
+                : "操作未完成"
+          }
+        >
+          {action.error_message ? <p>{action.error_message}</p> : null}
+          <div className="repair__result-actions">
+            {!isProcess && !isRestore && action.status === "succeeded" && action.recovery_available && (
+              <Button size="sm" busy={busy} onClick={prepareRecovery} disabled={busy}>
+                生成恢复计划
+              </Button>
+            )}
+            {isProcess && action.status === "close_pending" && (
+              <Button size="sm" variant="danger" busy={busy} onClick={prepareTermination} disabled={busy}>
+                生成强制终止计划
+              </Button>
+            )}
+          </div>
+        </Notice>
       )}
-      {message && <p className="diagnosis-message" role="status">{message}</p>}
+
+      {message && (
+        <Notice tone="warn" role="status" className="repair__result">
+          {message}
+        </Notice>
+      )}
     </section>
   );
 }

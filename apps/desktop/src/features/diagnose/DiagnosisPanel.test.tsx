@@ -65,6 +65,24 @@ describe("DiagnosisPanel", () => {
     expect(screen.getByText(/不会自动修复/)).toBeInTheDocument();
   });
 
+  it("never renders a raw status value when a diagnosis has no report", async () => {
+    const client = api();
+    const failed: Diagnosis = {
+      ...report(),
+      status: "failed",
+      report: null,
+      current_step: null,
+      failure_message: "网络诊断在访问固定测试目标时超时。",
+    };
+    vi.spyOn(client, "get").mockResolvedValue({ items: [failed] });
+
+    render(<DiagnosisPanel client={client} />);
+
+    expect(await screen.findByText("诊断失败")).toBeInTheDocument();
+    expect(screen.queryByText("failed")).not.toBeInTheDocument();
+    expect(screen.getByText("网络诊断在访问固定测试目标时超时。")).toBeInTheDocument();
+  });
+
   it("starts a natural-language diagnosis and discloses bounded network traffic", async () => {
     const client = api();
     vi.spyOn(client, "get").mockResolvedValue({ items: [] });

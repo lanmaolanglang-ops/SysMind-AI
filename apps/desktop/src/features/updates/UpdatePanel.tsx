@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { Button } from "../../ui/Button";
 import {
   checkForAppUpdate,
   getAppVersion,
@@ -14,6 +15,10 @@ type UpdateState =
   | { kind: "installing"; version: string }
   | { kind: "error"; message: string };
 
+/**
+ * A single settings row. The surrounding panel owns the heading, so this
+ * component only reports version, status and the action to take.
+ */
 export function UpdatePanel() {
   const [version, setVersion] = useState("—");
   const [state, setState] = useState<UpdateState>({ kind: "idle" });
@@ -58,13 +63,16 @@ export function UpdatePanel() {
   }
 
   const busy = state.kind === "checking" || state.kind === "installing";
+  const tone =
+    state.kind === "error" ? "danger" : state.kind === "available" ? "warn" : "ok";
 
   return (
-    <section className="update-strip" aria-labelledby="update-title">
-      <div>
-        <h2 id="update-title">应用更新</h2>
-        <p>当前版本 {version}。更新包会先验证发布签名，诊断数据在升级时保留在本机。</p>
-        <div className="update-message" aria-live="polite">
+    <div className="setting">
+      <div className="setting__text">
+        <p>
+          当前版本 {version}。更新包会先验证发布签名，诊断数据在升级时保留在本机。
+        </p>
+        <div className="setting__status" data-tone={tone} aria-live="polite">
           {state.kind === "current" && <span>当前已是最新版本。</span>}
           {state.kind === "available" && (
             <span>发现版本 {state.update.version}，安装后应用会重新启动。</span>
@@ -73,17 +81,21 @@ export function UpdatePanel() {
           {state.kind === "error" && <span role="alert">{state.message}</span>}
         </div>
       </div>
-      <div className="update-actions">
+      <div className="setting__action">
         {state.kind === "available" ? (
-          <button type="button" onClick={() => void install(state.update)} disabled={busy}>
+          <Button
+            variant="primary"
+            busy={busy}
+            onClick={() => void install(state.update)}
+          >
             安装并重启
-          </button>
+          </Button>
         ) : (
-          <button type="button" onClick={() => void checkForUpdates()} disabled={busy}>
+          <Button busy={busy} onClick={() => void checkForUpdates()}>
             {state.kind === "checking" ? "正在检查…" : "检查更新"}
-          </button>
+          </Button>
         )}
       </div>
-    </section>
+    </div>
   );
 }

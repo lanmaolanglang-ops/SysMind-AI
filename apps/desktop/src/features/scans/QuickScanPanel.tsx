@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiClientError, type ApiClient } from "../../services/api-client";
+import { Button } from "../../ui/Button";
+import { EmptyState } from "../../ui/EmptyState";
+import { Notice } from "../../ui/Notice";
+import { Panel, PanelSection } from "../../ui/Panel";
 import {
   cancelScan,
   getRecentScans,
@@ -46,6 +50,13 @@ function statusCopy(scan: ScanRecord): string {
     default:
       return scan.current_step ? (STEP_LABELS[scan.current_step] ?? "正在采集") : "准备扫描";
   }
+}
+
+/** Disk pressure is carried by the text label too; colour only reinforces it. */
+function meterTone(utilization: number): string {
+  if (utilization >= 90) return "meter meter--danger";
+  if (utilization >= 75) return "meter meter--warn";
+  return "meter";
 }
 
 function normalizeError(error: unknown): { message: string; correlationId?: string } {
@@ -130,65 +141,71 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
   };
 
   return (
-    <section className="scan-panel" aria-labelledby="scan-title">
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {scan ? statusCopy(scan) : ""}
-      </div>
-      <div className="scan-header">
-        <div>
-          <h2 id="scan-title">了解这台电脑此刻的状态</h2>
-          <p className="scan-description">
-            检查系统、硬件、磁盘与当前进程。扫描不会修改设置，也不会结束任何进程。
-          </p>
-        </div>
-        {!active && (
-          <button className="primary-action" type="button" onClick={start} disabled={starting}>
+    <Panel
+      titleId="scan-title"
+      title="了解这台电脑此刻的状态"
+      description="检查系统、硬件、磁盘与当前进程。扫描不会修改设置，也不会结束任何进程。"
+      actions={
+        active ? undefined : (
+          <Button variant="primary" busy={starting} onClick={start} disabled={starting}>
             {starting ? "正在创建…" : scan ? "重新扫描" : "开始扫描"}
-          </button>
-        )}
-      </div>
-
+          </Button>
+        )
+      }
+      /* Single announcement channel: it only mutates when the status or step
+         actually changes, so assistive technology is not re-notified per poll. */
+      status={scan ? statusCopy(scan) : ""}
+    >
       {error && (
-        <div className="inline-error" role="alert">
-          <span>{error.message}</span>
-          {error.correlationId && <code>问题编号 {error.correlationId}</code>}
-        </div>
+        <Notice
+          tone="danger"
+          role="alert"
+          className="panel__notice"
+          meta={error.correlationId ? `问题编号 ${error.correlationId}` : undefined}
+        >
+          {error.message}
+        </Notice>
       )}
 
       {active && scan && (
         <div className="scan-progress">
-          <div className="progress-copy">
-            <strong>{statusCopy(scan)}</strong>
-            <span>{scan.progress}%</span>
+          <div className="progress-row">
+            <div className="progress-row__label">
+              <strong>{statusCopy(scan)}</strong>
+              <span>{scan.progress}%</span>
+            </div>
+            <progress className="progress" value={scan.progress} max="100" aria-label="快速扫描进度">
+              {scan.progress}%
+            </progress>
           </div>
-          <progress value={scan.progress} max="100" aria-label="快速扫描进度">
-            {scan.progress}%
-          </progress>
-          <button className="text-action" type="button" onClick={cancel} disabled={cancelling}>
+          <Button variant="ghost" busy={cancelling} onClick={cancel} disabled={cancelling}>
             {cancelling ? "正在取消…" : "取消扫描"}
-          </button>
+          </Button>
         </div>
       )}
 
       {!scan && !active && (
-        <div className="scan-empty">
-          <p>首次扫描通常只需几秒。结果只保存在这台电脑的本地数据库中。</p>
-        </div>
+        <EmptyState title="还没有扫描记录">
+          首次扫描通常只需几秒。结果只保存在这台电脑的本地数据库中。
+        </EmptyState>
       )}
 
       {scan && TERMINAL_STATUSES.has(scan.status) && (
-        <div className="scan-result">
-          <div className="result-status">
-            <div>
-              <span className={`result-mark result-mark--${scan.status}`} aria-hidden="true" />
+        <PanelSection>
+          <div className="result-head">
+            <span className="result-head__state">
+              <span
+                className={`dot dot--${scan.status === "completed" ? "ok" : scan.status === "partial" ? "warn" : "danger"}`}
+                aria-hidden="true"
+              />
               <strong>{statusCopy(scan)}</strong>
-            </div>
-            {completedAt && <time>{completedAt}</time>}
+            </span>
+            {completedAt && <time className="result-head__time">{completedAt}</time>}
           </div>
 
           {scan.summary && (
             <>
-              <dl className="system-overview">
+              <dl className="facts">
                 <div>
                   <dt>Windows</dt>
                   <dd>
@@ -219,20 +236,20 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
                 </div>
               </dl>
 
-              <div className="result-section">
-                <div className="section-heading">
+              <PanelSection>
+                <div className="section-title">
                   <h3>磁盘空间</h3>
                   <span>{scan.summary.disks.length} 个卷</span>
                 </div>
-                <div className="disk-list">
+                <div className="rows">
                   {scan.summary.disks.map((disk) => (
                     <div className="disk-row" key={`${disk.volume}-${disk.mountpoint}`}>
-                      <strong>{disk.volume || disk.mountpoint}</strong>
-                      <span>
+                      <span className="row__primary">{disk.volume || disk.mountpoint}</span>
+                      <span className="row__meta">
                         {formatBytes(disk.free_bytes)} 可用 · 已用 {disk.utilization_percent}%
                       </span>
                       <div
-                        className="meter"
+                        className={meterTone(disk.utilization_percent)}
                         role="meter"
                         aria-label={`${disk.volume} 磁盘使用率`}
                         aria-valuemin={0}
@@ -244,42 +261,45 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
                     </div>
                   ))}
                 </div>
-              </div>
+              </PanelSection>
 
-              <div className="result-section">
-                <div className="section-heading">
+              <PanelSection>
+                <div className="section-title">
                   <h3>高占用进程</h3>
                   <span>已观察 {scan.summary.processes.length} 个进程</span>
                 </div>
                 {scan.summary.high_usage_processes.length ? (
-                  <div className="process-list">
+                  <div className="rows">
                     {scan.summary.high_usage_processes.slice(0, 8).map((process) => (
                       <div className="process-row" key={process.pid}>
-                        <span className="process-name">{process.name}</span>
-                        <span>CPU {process.cpu_percent}%</span>
-                        <span>{formatBytes(process.memory_bytes)}</span>
+                        <span className="row__primary">{process.name}</span>
+                        <span className="row__meta">CPU {process.cpu_percent}%</span>
+                        <span className="row__meta">{formatBytes(process.memory_bytes)}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="quiet-result">采样期间未发现明显的高占用进程。</p>
+                  <p className="quiet">采样期间未发现明显的高占用进程。</p>
                 )}
-              </div>
+              </PanelSection>
             </>
           )}
 
           {scan.failures.length > 0 && (
-            <div className="scan-warnings">
-              <strong>以下项目未完成</strong>
-              <ul>
+            <Notice
+              tone="warn"
+              title="以下项目未完成"
+              className="panel__notice"
+            >
+              <ul className="plain-list">
                 {scan.failures.map((failure) => (
                   <li key={failure.tool}>{failure.message}</li>
                 ))}
               </ul>
-            </div>
+            </Notice>
           )}
-        </div>
+        </PanelSection>
       )}
-    </section>
+    </Panel>
   );
 }

@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApiClientError, type ApiClient, type SseEvent } from "../../services/api-client";
+import { Badge } from "../../ui/Badge";
+import { Button } from "../../ui/Button";
+import { Notice } from "../../ui/Notice";
+import { Panel, PanelSection } from "../../ui/Panel";
 import {
   cancelAgentTask,
   getAgentTask,
@@ -160,28 +164,30 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
       .finally(() => setBusy(false));
   };
 
-  return (
-    <section className="agent-panel" aria-labelledby="agent-runtime-title">
-      <div className="agent-heading">
-        <div>
-          <h2 id="agent-runtime-title">受限 Agent Runtime</h2>
-          <p>
-            Phase 3 使用离线 Fake Provider 验证预算、工具白名单、SSE 和审计；这里不会生成诊断报告。
-          </p>
-        </div>
-        <span className="runtime-badge">Fake Provider · 离线</span>
-      </div>
+  const showResults = events.length > 0 || (task !== null && TERMINAL.has(task.status));
 
-      <label className="agent-goal">
-        框架测试目标
-        <input value={goal} maxLength={1000} onChange={(event) => setGoal(event.target.value)} />
+  return (
+    <Panel
+      titleId="agent-runtime-title"
+      title="受限 Agent Runtime"
+      description="Phase 3 使用离线 Fake Provider 验证预算、工具白名单、SSE 和审计；这里不会生成诊断报告。"
+      badge={<Badge tone="accent">Fake Provider · 离线</Badge>}
+    >
+      <label className="field goal">
+        <span className="field__label">框架测试目标</span>
+        <input
+          className="control"
+          value={goal}
+          maxLength={1000}
+          onChange={(event) => setGoal(event.target.value)}
+        />
       </label>
 
-      <fieldset className="agent-tools">
-        <legend>允许模型看到的只读工具（可选）</legend>
-        <div>
+      <fieldset className="tools">
+        <legend className="field__label">允许模型看到的只读工具（可选）</legend>
+        <div className="tools__options">
           {tools.map((tool) => (
-            <label key={tool.qualified_name}>
+            <label className="option option--boxed" key={tool.qualified_name}>
               <input
                 type="checkbox"
                 checked={selectedTools.includes(tool.qualified_name)}
@@ -194,55 +200,67 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
         </div>
       </fieldset>
 
-      {error && <div className="inline-error" role="alert">{error}</div>}
+      {error && (
+        <Notice tone="danger" role="alert" className="panel__notice">
+          {error}
+        </Notice>
+      )}
 
-      <div className="agent-action-row">
+      <div className="action-row">
         {active && task ? (
           <>
-            <div className="agent-progress" role="status">
-              <strong>{STATUS_COPY[task.status]}</strong>
-              <progress value={task.progress} max="100" aria-label="Agent 任务进度" />
+            <div className="progress-row" role="status">
+              <div className="progress-row__label">
+                <strong>{STATUS_COPY[task.status]}</strong>
+              </div>
+              <progress className="progress" value={task.progress} max="100" aria-label="Agent 任务进度" />
             </div>
-            <button className="text-action" type="button" onClick={cancel} disabled={busy}>
+            <Button variant="ghost" busy={busy} onClick={cancel} disabled={busy}>
               {busy ? "正在取消…" : "取消任务"}
-            </button>
+            </Button>
           </>
         ) : (
-          <button
-            className="primary-action"
-            type="button"
-            onClick={start}
-            disabled={busy || !goal.trim()}
-          >
+          <Button variant="primary" busy={busy} onClick={start} disabled={busy || !goal.trim()}>
             {busy ? "正在创建…" : task ? "重新自检" : "运行离线自检"}
-          </button>
+          </Button>
         )}
       </div>
 
-      {(events.length > 0 || (task && TERMINAL.has(task.status))) && (
-        <div className="agent-results">
+      {showResults && (
+        <PanelSection>
           {task && TERMINAL.has(task.status) && (
-            <div className="result-status">
-              <div><strong>{STATUS_COPY[task.status]}</strong></div>
-              <span>{task.tool_call_count} 次工具调用 · {task.current_round} 轮</span>
+            <div className="result-head">
+              <span className="result-head__state">
+                <strong>{STATUS_COPY[task.status]}</strong>
+              </span>
+              <span className="row__meta">
+                {task.tool_call_count} 次工具调用 · {task.current_round} 轮
+              </span>
             </div>
           )}
+
           {events.length > 0 && (
-            <ol className="agent-timeline" aria-label="Agent 任务事件">
+            <ol className="timeline" aria-label="Agent 任务事件">
               {events.map((event, index) => (
                 <li key={event.id ?? `${event.event}-${index}`}>
-                  <span>{eventCopy(event)}</span>
-                  <time>{new Date(event.data.created_at).toLocaleTimeString("zh-CN")}</time>
+                  <span className="timeline__text">{eventCopy(event)}</span>
+                  <time className="timeline__time">
+                    {new Date(event.data.created_at).toLocaleTimeString("zh-CN")}
+                  </time>
                 </li>
               ))}
             </ol>
           )}
-          {task?.final_output && <p className="agent-output">{task.final_output}</p>}
+
+          {task?.final_output && <p className="output">{task.final_output}</p>}
+
           {task?.failure_message && (
-            <div className="scan-warnings"><strong>{task.failure_message}</strong></div>
+            <Notice tone="warn" title="任务未完成" className="panel__notice">
+              {task.failure_message}
+            </Notice>
           )}
-        </div>
+        </PanelSection>
       )}
-    </section>
+    </Panel>
   );
 }
