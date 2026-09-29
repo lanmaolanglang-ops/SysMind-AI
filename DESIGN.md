@@ -2,66 +2,64 @@
 name: "SysMind AI"
 description: "Calm local Windows diagnostics with bounded, readable, auditable evidence."
 colors:
-  local-green: "#246340"
-  local-green-deep: "#194e31"
-  canvas-mist: "#edf0eb"
-  surface-white: "#fafbf8"
-  text-strong: "#1a241f"
-  text-body: "#56625b"
-  text-muted: "#5d6862"
-  border-soft: "#e5e9e4"
-  status-connected: "#26824a"
-  status-starting: "#b07323"
-  status-error: "#b53c36"
+  canvas: "#edf0eb"
+  surface: "#fafbf8"
+  surface-sunken: "#f4f7f3"
+  surface-inset: "#edf1ec"
+  ink-strong: "#1a241f"
+  ink: "#3f4c45"
+  ink-muted: "#5d6862"
+  ink-subtle: "#78837c"
+  accent: "#246340"
+  accent-strong: "#194e31"
+  accent-soft: "#e4eee7"
+  ok: "#26824a"
+  warn: "#b07323"
+  danger: "#b53c36"
+  line: "#e2e7e2"
+  line-strong: "#cdd6cf"
 typography:
   display:
     fontFamily: "Segoe UI Variable Text, Segoe UI, system-ui, sans-serif"
-    fontSize: "clamp(42px, 5vw, 64px)"
+    fontSize: "23px"
     fontWeight: 700
-    lineHeight: 0.98
-    letterSpacing: "-0.035em"
+    lineHeight: 1.25
+    letterSpacing: "-0.015em"
   title:
     fontFamily: "Segoe UI Variable Text, Segoe UI, system-ui, sans-serif"
-    fontSize: "clamp(24px, 3vw, 34px)"
+    fontSize: "19px"
     fontWeight: 700
-    lineHeight: 1.2
-    letterSpacing: "-0.025em"
+    lineHeight: 1.25
   body:
     fontFamily: "Segoe UI Variable Text, Segoe UI, system-ui, sans-serif"
-    fontSize: "16px"
+    fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.65
   label:
     fontFamily: "Segoe UI Variable Text, Segoe UI, system-ui, sans-serif"
     fontSize: "12px"
-    fontWeight: 700
-    lineHeight: 1.2
+    fontWeight: 650
+    lineHeight: 1.45
 rounded:
-  symbol: "9px"
   control: "10px"
-  panel: "16px"
+  panel: "14px"
   pill: "999px"
 spacing:
-  compact: "10px"
-  control-x: "18px"
+  base: "4px"
+  control-x: "16px"
+  panel-x: "32px"
   shell-x: "32px"
-  panel-x: "40px"
 components:
   button-primary:
-    backgroundColor: "{colors.local-green}"
-    textColor: "{colors.surface-white}"
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.surface}"
     rounded: "{rounded.control}"
-    padding: "11px 18px"
-  connection-chip:
-    backgroundColor: "rgba(255, 255, 255, 0.7)"
-    textColor: "#48534d"
-    rounded: "{rounded.pill}"
-    padding: "7px 11px"
-  scan-panel:
-    backgroundColor: "{colors.surface-white}"
-    textColor: "{colors.text-strong}"
+    padding: "8px 16px"
+  panel:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink-strong}"
     rounded: "{rounded.panel}"
-    padding: "34px 40px"
+    padding: "24px 32px"
 ---
 
 # Design System: SysMind AI
@@ -70,124 +68,159 @@ components:
 
 **Creative North Star: "Calm Local Utility"**
 
-SysMind AI uses familiar Windows typography, quiet green-gray surfaces, and one dominant evidence panel to make local diagnostics feel controlled rather than alarming. Phase 1 extends the original connection shell into an operational scan surface without becoming a dense monitoring dashboard.
+SysMind AI uses familiar Windows typography, quiet green-gray surfaces, and one
+dominant working surface to make local diagnostics feel controlled rather than
+alarming.
 
-The interface privileges truthful state: local-service readiness, current collector, terminal result, partial failure, and cancellation are always written in plain Chinese. Hardware and redacted event evidence are allowed to wrap and data stays readable instead of being shortened for symmetry.
+The interface privileges truthful state: local-service readiness, the current
+collector step, terminal results, partial failures, and cancellation are always
+written in plain Chinese. Hardware and redacted event evidence is allowed to
+wrap, and data stays readable instead of being shortened for symmetry.
 
 **Key Characteristics:**
 
 - One restrained green accent over warm neutral surfaces.
-- One lifted scan surface; internal evidence is separated by flat rows and dividers.
+- One application shell: a navigation rail, a workspace header, and a single
+  scrolling working surface.
 - Large direct headings, compact metadata, and tabular numeric details.
-- Text accompanies every semantic color and progress state.
-- Narrow windows preserve the primary scan action and all evidence fields.
-- Event-log filters expose channel, level, bounded time window, and optional event IDs before collection starts.
+- Text accompanies every semantic colour and progress state.
+- Narrow windows collapse the rail to icons; evidence never drops fields.
 
-## Colors
+## Information Architecture
 
-Local green identifies trusted local actions and successful states. Amber is reserved for waiting or partial evidence, red for failure, and neutrals carry nearly all structure.
+The product has five destinations, ordered by user priority:
 
-**The Semantic Status Rule.** Never communicate connection or scan state by color alone; pair every mark with explicit text.
+1. **诊断 (Diagnosis)** — the default. Natural-language symptom, an
+   application-authored plan, and an evidence-bound report. This is the reason
+   the application exists.
+2. **快速扫描 (Scan)** — a bounded read-only snapshot of system, hardware,
+   disks and processes.
+3. **事件日志 (Logs)** — Windows event log analysis over a bounded window.
+4. **Agent Runtime** — the restricted Phase 3 runtime self-check. A developer
+   and verification surface, not a diagnosis feature.
+5. **设置与更新 (Settings)** — application version, updates, and the local data
+   and network boundary.
 
-**The Quiet Canvas Rule.** Canvas and panel neutrals own most of the screen. Green is reserved for state and action, not decoration.
+**The One-Section Rule.** Only the active destination is mounted. At most one
+collector polls or streams at any moment, and each panel reloads the latest
+record from the backend when it mounts. Application updates are maintenance and
+must never sit above diagnosis.
+
+## Colours
+
+All colour is defined once in `src/styles/tokens.css`. Components reference
+tokens and never introduce raw hex values.
+
+Local green identifies trusted local actions and successful states. Amber is
+reserved for waiting, partial evidence and elevated risk; red for failure and
+irreversible actions. Neutrals carry nearly all structure.
+
+**The Semantic Status Rule.** Never communicate connection, scan or action state
+by colour alone; pair every mark with explicit text.
+
+**The Quiet Canvas Rule.** Canvas and panel neutrals own most of the screen.
+Green is reserved for state and action, not decoration.
 
 ## Typography
 
-**Display Font:** Segoe UI Variable Text with Segoe UI and system sans-serif fallbacks  
-**Body Font:** Segoe UI Variable Text with Segoe UI and system sans-serif fallbacks  
-**Label/Mono Font:** Segoe UI for labels; Cascadia Mono or Consolas only for correlation identifiers
+**Display Font:** Segoe UI Variable Text with Segoe UI and system sans-serif fallbacks
+**Body Font:** Segoe UI Variable Text with Segoe UI and system sans-serif fallbacks
+**Label/Mono Font:** Segoe UI for labels; Cascadia Mono or Consolas for correlation identifiers, tool names and field paths.
 
-**Character:** The system face feels native to Windows and keeps Chinese and technical values legible. Hierarchy comes from weight and scale; no decorative display face is introduced.
+**Character:** The system face feels native to Windows and keeps Chinese and
+technical values legible. Hierarchy comes from weight and colour as much as from
+size; no decorative display face is introduced.
 
 ### Hierarchy
 
-- **Display:** Device-level title only; tightly tracked but never below `-0.04em`.
-- **Title:** Scan purpose and major runtime state.
-- **Body:** Plain-language explanations, capped to readable line lengths.
-- **Label:** Connection state, field names, timestamps, and compact metrics.
+Nine steps only, defined as `--text-xs` through `--text-3xl`:
 
-**The Evidence Can Wrap Rule.** Hardware names and values wrap when necessary; they are never silently ellipsized.
+- **Display (`--text-2xl`, 23px):** the application title on the connection gate.
+- **Title (`--text-xl`, 19px):** panel headings. Every panel heading is the same size.
+- **Subtitle (`--text-lg`, 16px):** section headings and finding titles.
+- **Body (`--text-base`/`--text-md`, 13–14px):** explanations and evidence values.
+- **Label (`--text-sm`/`--text-xs`, 12–11px):** field names, timestamps, metrics, badges.
+
+**The Evidence Can Wrap Rule.** Hardware names, process names, commands, and
+error text wrap when necessary; they are never silently ellipsised.
 
 ## Layout
 
-The desktop shell centers a maximum-width workspace. A compact overview aligns the device title with local runtime metadata, followed by one full-width scan panel. Within the panel, definition rows, disk meters, and process rows create scanable evidence without nested cards.
+A fixed shell owns the window: a `232px` navigation rail on the left, and a
+workspace that stacks a `60px` header above a single scrolling content region.
+The page itself never scrolls, so the rail and header stay put while evidence
+moves. Content is centred at a maximum of `1180px`.
 
-At `760px` and below, runtime metadata is removed because the connection chip already carries readiness. The overview tightens, the scan header stacks, and the primary action remains visible in the first window. Result columns collapse without dropping process memory or utilization values.
+Each destination renders exactly one Panel. The panel owns its heading,
+description, state badge and primary action, so heading scale, padding and
+borders are identical across the product.
+
+At `1000px` and below the rail collapses to a `68px` icon strip: labels leave
+the visual layout but remain in the accessibility tree, and each destination
+carries a hover tooltip. At `720px` and below panel headers stack, metadata is
+removed from the workspace header, and inline controls fill the available width.
 
 ## Elevation & Depth
 
-Depth is structural and scarce. The scan panel alone uses the diffuse `0 22px 52px rgba(36, 52, 43, 0.13)` shadow. The top bar, status chip, internal sections, and data rows remain flat.
+Depth is structural and scarce. The navigation rail is flat and separated by a
+single border. The working panel is flat with a hairline border. Only the
+connection gate may float, using the diffuse `--shadow-panel`.
 
-**The Single Lift Rule.** One operational surface may float; evidence inside it uses spacing and dividers, never additional card shadows.
+**The Single Lift Rule.** One surface may float, and only when it is the only
+thing on screen. Evidence inside a panel uses spacing and dividers, never
+additional card shadows.
 
 ## Shapes
 
-The system uses gently rounded utility geometry: a 16px scan panel, 10px controls, a pill-shaped connection chip, thin rounded meters, and circular status marks. Borders are soft structural dividers rather than decoration.
+Gently rounded utility geometry: `14px` panels, `10px` controls, `8px` inputs
+and chips, pill-shaped badges and meters, circular status marks. Borders are
+soft structural dividers rather than decoration.
 
 ## Components
 
-### Primary Scan Button
+The shared primitives live in `src/ui/` and their styles in
+`src/styles/components.css`.
 
-- Deep local green fill, white text, 10px radius, and compact confident padding.
-- Hover darkens the fill; keyboard focus uses a visible offset green outline.
-- Disabled creation or cancellation states retain explicit working text.
+### Button
 
-### Connection Chip
+- `primary` — deep local green fill; the single most important action on a screen.
+- `secondary` — bordered neutral; the default for everything else.
+- `ghost` — text-only; used for cancel and other reversible escapes.
+- `danger` — red outline; reserved for irreversible confirmation.
+- A `busy` control keeps its explicit working label ("正在创建…") and adds a
+  spinner; disabled controls stay legible and use `not-allowed`, never `wait`.
 
-- A translucent neutral pill at the trailing edge of the app bar.
-- Combines a semantic dot with Chinese local-service status text.
+### Panel
 
-### Scan Panel
+- One heading, one description, one optional state badge, one optional action.
+- Body content is grouped with `PanelSection`, which inserts a divider whenever
+  it is not the first block in the body.
 
-- The single elevated surface contains introduction, action, progress, results, and bounded warnings.
-- Progress has an accessible name; terminal results remain in a polite live-status region.
-- Partial failures preserve and display successful evidence.
+### Badge
 
-### Evidence Rows and Meters
+- States a scope or condition in words: `只读诊断`, `只读 · 含敏感数据`,
+  `Fake Provider · 离线`. Colour reinforces, never replaces, the text.
 
-- System facts use definition rows with wrapping values.
-- Disk usage includes visible available/used text plus a semantic meter.
-- Process rows preserve name, normalized whole-machine CPU, and memory at every supported width.
+### StatusDot
 
-### Event Log Analysis
+- An 8px mark pairing colour with adjacent text. Pulses only while starting.
 
-- A quieter bordered surface follows the primary quick-scan panel and does not compete with its elevation.
-- The sensitivity label states that event logs are read-only but may contain sensitive data.
-- Common event groups, application crash groups, partial channel failures, and redacted evidence remain distinct.
-- Filter controls never permit an empty channel or level selection, and the UI does not expose raw XPath or arbitrary channel input.
+### Notice
 
-### Bounded Agent Runtime
+- The only way the interface reports an outcome. Tone is explicit
+  (`info` / `ok` / `warn` / `danger`), so a failure can never render with the
+  same styling as a success.
+- `role="alert"` is used for conditions that interrupt; `role="status"` for the rest.
 
-- A bordered operational surface follows collected evidence and is explicitly labeled as the Phase 3 restricted runtime, not as a diagnosis report.
-- The default Fake Provider is visibly identified as offline; the interface never implies that data was sent to a cloud model.
-- Users choose from the registered read-only tool catalog. There is no free-form tool name, command, privilege, confirmation, or provider-secret input.
-- Ordered planning, tool, completion, failure, and cancellation events remain readable after an SSE reconnect, with the last event cursor preserved.
-- Cancellation stays available while work is active; terminal output distinguishes a result from the local audit timeline.
+### Fields and Controls
 
-### Natural-language Diagnosis and Reports
+- One `field` wrapper (label + control), one `control` style for inputs, selects
+  and textareas, one focus treatment for the whole product.
 
-- The diagnosis surface appears before specialist scan panels and asks for the symptom in ordinary language.
-- A visible read-only label and nearby network disclosure establish scope before the primary action; network text names fixed targets and bounded traffic without implying a generic connectivity probe.
-- The application-authored plan is shown as a compact ordered ledger with purpose and exact versioned tool, so progress remains understandable without exposing raw arguments.
-- Reports use one flat evidence document: ranked findings, explanation, recommendation, confidence, and readable tool-call/field-path references separated by rules rather than nested cards.
-- Limitations are first-class report content. Partial evidence, ambiguous classification, and model fallback remain visible beside otherwise successful conclusions.
-- Export and feedback are secondary actions after the evidence, while recent reports remain selectable without browser persistence.
+### Evidence Rows
 
-### Controlled Repair Actions
-
-- Controlled repair appears inside a completed evidence report and is visually separate from diagnosis.
-- The user first selects an enumerated current-user startup item, then reviews a confirmation card naming the exact target, effect, two-minute scope, and verification behavior.
-- Reject and confirm are explicit per-item decisions; there is no batch approval, persistent authorization, arbitrary path field, or model-authored action.
-- Success is shown only after verification. Recovery creates another confirmation card and never overwrites a target slot changed by another program.
-- Process candidates appear only when directly supported by high-usage evidence. Graceful close explains the save prompt and bounded wait; it never auto-escalates.
-- Forced termination is available only after a pending close and uses two visibly distinct confirmations that state unsaved data may be lost and recovery is unavailable.
-
-### Application Updates
-
-- Update status is a flat utility strip between device identity and diagnosis, not another elevated panel.
-- Checking is explicit because it creates outbound traffic; failure states confirm that local diagnosis remains usable.
-- A discovered version requires a separate install-and-restart action. Copy states that signatures are verified and local diagnostic data is preserved.
-- Long versions and errors wrap; loading, current, available, installing, and retry states remain keyboard accessible and never rely on color alone.
+- Definition rows (`facts`) and list rows (`rows`) are flat and separated by
+  hairlines. Disk meters carry both visible text and a semantic `role="meter"`.
 
 ## Do's and Don'ts
 
@@ -196,11 +229,68 @@ The system uses gently rounded utility geometry: a 16px scan panel, 10px control
 - **Do** state that scans are local and read-only near the primary action.
 - **Do** keep status copy understandable to non-technical Windows users.
 - **Do** preserve evidence and show bounded per-collector failure.
-- **Do** honor keyboard focus and reduced-motion preferences.
+- **Do** honour keyboard focus and reduced-motion preferences.
+- **Do** add a new token before adding a new raw value.
 
 ### Don't:
 
 - **Don't** turn system evidence into a grid of floating statistic cards.
-- **Don't** truncate hardware truth or hide metrics merely to simplify narrow layouts.
-- **Don't** add phase kickers, decorative sequence numbers, gradients, glass effects, or duplicate in-app branding.
-- **Don't** present the bounded Agent runtime as autonomous repair, process termination, or a Phase 4 diagnosis report.
+- **Don't** truncate hardware truth or hide metrics to simplify narrow layouts.
+- **Don't** add phase kickers, decorative sequence numbers, gradients, glass
+  effects, or duplicate in-app branding.
+- **Don't** present the bounded Agent runtime as autonomous repair, process
+  termination, or a Phase 4 diagnosis report.
+- **Don't** mount a section that is not visible; background collectors waste
+  power and produce duplicated error reporting.
+
+## Feature Surfaces
+
+### Natural-language Diagnosis and Reports
+
+- The composer is the product's primary interaction and sits at the top of the
+  default destination.
+- A visible read-only label and nearby network disclosure establish scope before
+  the primary action; network text names fixed targets and bounded traffic
+  without implying a generic connectivity probe.
+- The application-authored plan is shown as a compact ordered ledger with
+  purpose and exact versioned tool, so progress is understandable without
+  exposing raw arguments.
+- Reports use one flat evidence document: ranked findings, explanation,
+  recommendation, confidence, and readable tool-call/field-path references
+  separated by rules rather than nested cards.
+- Limitations are first-class report content.
+
+### Controlled Repair Actions
+
+- Controlled repair appears inside a completed evidence report and is visually
+  separate from diagnosis.
+- The user selects an enumerated candidate, then reviews a confirmation card
+  naming the exact target, effect, two-minute scope, and verification behaviour.
+- Confirmation is the loudest surface in the product: amber for reversible
+  actions, red for forced termination.
+- Reject and confirm are explicit per-item decisions; there is no batch
+  approval, persistent authorization, or model-authored action.
+- Success is shown only after verification.
+
+### Event Log Analysis
+
+- A neutral bordered surface. The sensitivity label states that event logs are
+  read-only but may contain sensitive data.
+- Filter controls never permit an empty channel or level selection, and the UI
+  does not expose raw XPath or arbitrary channel input.
+
+### Bounded Agent Runtime
+
+- Explicitly labelled as the restricted runtime, not a diagnosis report.
+- The default Fake Provider is visibly identified as offline; the interface
+  never implies that data was sent to a cloud model.
+- Users choose from the registered read-only tool catalog. There is no
+  free-form tool name, command, privilege, confirmation, or provider-secret input.
+
+### Application Updates
+
+- Updates live in settings, never above the working sections.
+- Checking is explicit because it creates outbound traffic; failure states
+  confirm that local diagnosis remains usable.
+- Long versions and errors wrap; every state remains keyboard accessible and
+  never relies on colour alone.
