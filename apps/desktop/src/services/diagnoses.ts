@@ -45,6 +45,8 @@ export interface Diagnosis {
   failure_message: string | null;
   created_at: string;
   completed_at: string | null;
+  /** Whether this report already carries user feedback, as recorded locally. */
+  feedback_submitted: boolean;
   tool_calls: Array<{
     id: string;
     tool_name: string;

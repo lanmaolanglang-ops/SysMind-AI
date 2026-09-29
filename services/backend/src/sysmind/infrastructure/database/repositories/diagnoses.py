@@ -247,6 +247,11 @@ class SqlAlchemyDiagnosisRepository(DiagnosisRepository):
                 )
             )
 
+    def feedback_submitted_ids(self) -> set[str]:
+        """Diagnosis ids that already carry user feedback."""
+        with self._sessions() as session:
+            return set(session.scalars(select(DiagnosisFeedback.diagnosis_id).distinct()))
+
     def mark_interrupted(self, completed_at: str) -> int:
         with self._sessions.begin() as session:
             models = list(

@@ -41,6 +41,7 @@ function report(id = "diagnosis-1"): Diagnosis {
     failure_message: null,
     created_at: "2026-08-19T10:00:00Z",
     completed_at: "2026-08-19T10:00:01Z",
+    feedback_submitted: false,
     tool_calls: [
       {
         id: "tool-call-123456",
@@ -126,6 +127,20 @@ describe("DiagnosisPanel", () => {
     expect(screen.getByRole("button", { name: "有帮助" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "有帮助" }));
     expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps feedback locked when the report already recorded it", async () => {
+    const client = api();
+    vi.spyOn(client, "get").mockResolvedValue({
+      items: [{ ...report(), feedback_submitted: true }],
+    });
+
+    render(<DiagnosisPanel client={client} />);
+
+    // A remounted panel has no local record of the submission, so the lock has
+    // to come from the report itself.
+    expect(await screen.findByRole("button", { name: "有帮助" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "需要改进" })).toBeDisabled();
   });
 
   it("keeps the new diagnosis selected while late history is merged", async () => {

@@ -27,7 +27,11 @@ def _response(coordinator: DiagnosisCoordinator, diagnosis_id: str) -> Diagnosis
     record = coordinator.get(diagnosis_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Diagnosis not found.")
-    return DiagnosisResponse.from_record(record, coordinator.tool_calls(diagnosis_id))
+    return DiagnosisResponse.from_record(
+        record,
+        coordinator.tool_calls(diagnosis_id),
+        feedback_submitted=diagnosis_id in coordinator.feedback_submitted_ids(),
+    )
 
 
 @router.post("", response_model=DiagnosisResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -39,9 +43,14 @@ async def start_diagnosis(payload: StartDiagnosisRequest, request: Request) -> D
 @router.get("", response_model=DiagnosisListResponse)
 async def recent_diagnoses(request: Request) -> DiagnosisListResponse:
     coordinator = _coordinator(request)
+    submitted = coordinator.feedback_submitted_ids()
     return DiagnosisListResponse(
         items=[
-            DiagnosisResponse.from_record(item, coordinator.tool_calls(item.id))
+            DiagnosisResponse.from_record(
+                item,
+                coordinator.tool_calls(item.id),
+                feedback_submitted=item.id in submitted,
+            )
             for item in coordinator.recent()
         ]
     )

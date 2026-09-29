@@ -57,7 +57,11 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
   const [feedbackPendingIds, setFeedbackPendingIds] = useState<Set<string>>(() => new Set());
   const [message, setMessage] = useState<Message | null>(null);
   const activeId = diagnosis && !TERMINAL.has(diagnosis.status) ? diagnosis.id : null;
-  const feedbackSent = diagnosis ? feedbackIds.has(diagnosis.id) : false;
+  // Feedback already recorded locally stays sent across a remount; the local
+  // set only covers the optimistic window before the response comes back.
+  const feedbackSent = diagnosis
+    ? diagnosis.feedback_submitted || feedbackIds.has(diagnosis.id)
+    : false;
   const feedbackPending = diagnosis ? feedbackPendingIds.has(diagnosis.id) : false;
 
   const remember = useCallback((result: Diagnosis) => {

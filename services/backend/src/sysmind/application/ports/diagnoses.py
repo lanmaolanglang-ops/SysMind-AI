@@ -65,6 +65,7 @@ class DiagnosisRepository(Protocol):
     def add_feedback(
         self, diagnosis_id: str, helpful: bool, comment: str | None, created_at: str
     ) -> None: ...
+    def feedback_submitted_ids(self) -> set[str]: ...
     def add_model_call(
         self,
         diagnosis_id: str,

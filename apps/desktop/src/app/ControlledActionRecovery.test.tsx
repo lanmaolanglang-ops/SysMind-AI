@@ -30,6 +30,7 @@ function completedDiagnosis(): Diagnosis {
     current_step: null,
     created_at: "2026-09-29T10:00:00Z",
     completed_at: "2026-09-29T10:00:05Z",
+    feedback_submitted: false,
     failure_message: null,
     tool_calls: [],
     report: {

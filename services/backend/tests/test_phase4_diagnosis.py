@@ -173,6 +173,63 @@ def test_feedback_and_history(settings: Settings, auth_headers: dict[str, str]) 
         assert client.get("/api/v1/diagnoses", headers=auth_headers).json()["items"]
 
 
+def test_feedback_state_is_reported_back_to_the_client(
+    settings: Settings, auth_headers: dict[str, str]
+) -> None:
+    coordinator = _coordinator(settings)
+    with TestClient(create_app(settings, diagnosis_coordinator=coordinator)) as client:
+        created = client.post(
+            "/api/v1/diagnoses", json={"question": "应用闪退"}, headers=auth_headers
+        ).json()
+        _wait(client, created["id"], auth_headers)
+
+        history = client.get("/api/v1/diagnoses", headers=auth_headers).json()["items"]
+        assert history[0]["feedback_submitted"] is False
+
+        client.post(
+            f"/api/v1/diagnoses/{created['id']}/feedback",
+            json={"helpful": True},
+            headers=auth_headers,
+        )
+
+        # Both the history list and the detail view must report it, so a client
+        # that remounts can still tell that feedback was already given.
+        history = client.get("/api/v1/diagnoses", headers=auth_headers).json()["items"]
+        assert history[0]["feedback_submitted"] is True
+        detail = client.get(
+            f"/api/v1/diagnoses/{created['id']}", headers=auth_headers
+        ).json()
+        assert detail["feedback_submitted"] is True
+
+
+def test_feedback_state_is_scoped_to_its_own_diagnosis(
+    settings: Settings, auth_headers: dict[str, str]
+) -> None:
+    coordinator = _coordinator(settings)
+    with TestClient(create_app(settings, diagnosis_coordinator=coordinator)) as client:
+        first = client.post(
+            "/api/v1/diagnoses", json={"question": "应用闪退"}, headers=auth_headers
+        ).json()
+        _wait(client, first["id"], auth_headers)
+        second = client.post(
+            "/api/v1/diagnoses", json={"question": "电脑很卡"}, headers=auth_headers
+        ).json()
+        _wait(client, second["id"], auth_headers)
+
+        client.post(
+            f"/api/v1/diagnoses/{first['id']}/feedback",
+            json={"helpful": True},
+            headers=auth_headers,
+        )
+
+        by_id = {
+            item["id"]: item["feedback_submitted"]
+            for item in client.get("/api/v1/diagnoses", headers=auth_headers).json()["items"]
+        }
+        assert by_id[first["id"]] is True
+        assert by_id[second["id"]] is False
+
+
 @pytest.mark.anyio
 async def test_report_explainer_provider_contract() -> None:
     local = LocalReportExplainer()

@@ -71,10 +71,15 @@ class DiagnosisResponse(BaseModel):
     completed_at: datetime | None
     schema_version: str
     tool_calls: list[ToolCallDto] = Field(default_factory=list)
+    feedback_submitted: bool = False
 
     @classmethod
     def from_record(
-        cls, record: DiagnosisRecord, calls: tuple[DiagnosisToolCall, ...] = ()
+        cls,
+        record: DiagnosisRecord,
+        calls: tuple[DiagnosisToolCall, ...] = (),
+        *,
+        feedback_submitted: bool = False,
     ) -> DiagnosisResponse:
         call_data = [
             {
@@ -89,7 +94,14 @@ class DiagnosisResponse(BaseModel):
         ]
         data = asdict(record)
         data.pop("report_markdown")
-        return cls.model_validate({**data, "plan": list(record.plan), "tool_calls": call_data})
+        return cls.model_validate(
+            {
+                **data,
+                "plan": list(record.plan),
+                "tool_calls": call_data,
+                "feedback_submitted": feedback_submitted,
+            }
+        )
 
 
 class DiagnosisListResponse(BaseModel):

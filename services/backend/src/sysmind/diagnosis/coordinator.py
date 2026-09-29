@@ -86,6 +86,9 @@ class DiagnosisCoordinator:
     def feedback(self, diagnosis_id: str, helpful: bool, comment: str | None) -> None:
         self._repository.add_feedback(diagnosis_id, helpful, comment, _now())
 
+    def feedback_submitted_ids(self) -> set[str]:
+        return self._repository.feedback_submitted_ids()
+
     def tool_calls(self, diagnosis_id: str) -> tuple[DiagnosisToolCall, ...]:
         return self._repository.tool_calls(diagnosis_id)
 

@@ -2173,6 +2173,11 @@
             },
             "type": "array",
             "title": "Tool Calls"
+          },
+          "feedback_submitted": {
+            "type": "boolean",
+            "title": "Feedback Submitted",
+            "default": false
           }
         },
         "type": "object",
