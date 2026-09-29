@@ -1,0 +1,134 @@
+/*
+ * Design tokens — the single source of truth for the SysMind AI interface.
+ *
+ * Every colour, space, radius, type step, elevation and duration used anywhere in
+ * the app resolves to a token here. Components never introduce raw hex values,
+ * arbitrary pixel gaps, or one-off font sizes.
+ */
+
+:root {
+  /* ---- Typeface ------------------------------------------------------- */
+  --font-ui:
+    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+
+  /* ---- Colour: surfaces ----------------------------------------------
+   * Three neutral planes only. Canvas sits behind everything, surface is the
+   * working plane, sunken is used for inset controls and quiet regions.
+   */
+  --canvas: #edf0eb;
+  --surface: #fafbf8;
+  --surface-sunken: #f4f7f3;
+  --surface-inset: #edf1ec;
+  --surface-overlay: #ffffff;
+
+  /* ---- Colour: ink ---------------------------------------------------
+   * Four steps. Nothing else may be used for text.
+   */
+  --ink-strong: #1a241f;
+  --ink: #3f4c45;
+  --ink-muted: #5d6862;
+  --ink-subtle: #78837c;
+
+  /* ---- Colour: accent -------------------------------------------------
+   * Local green marks trust, primary action and success. It is reserved for
+   * state and action, never decoration.
+   */
+  --accent: #246340;
+  --accent-strong: #194e31;
+  --accent-soft: #e4eee7;
+  --accent-line: #bcd2c4;
+  --accent-ink: #1c5334;
+  --accent-ring: rgba(36, 99, 64, 0.32);
+
+  /* ---- Colour: status -------------------------------------------------
+   * Each status has a solid mark colour, a soft fill and a readable ink.
+   * Status is never communicated by colour alone; text always accompanies it.
+   */
+  --ok: #26824a;
+  --ok-soft: #e6f2ea;
+  --ok-line: #b3d5c0;
+  --ok-ink: #1d5c37;
+
+  --warn: #b07323;
+  --warn-soft: #f8f1e2;
+  --warn-line: #e0c99b;
+  --warn-ink: #7a5217;
+
+  --danger: #b53c36;
+  --danger-soft: #f9eae8;
+  --danger-line: #e0b4b0;
+  --danger-ink: #8e302c;
+
+  --neutral-mark: #8a938e;
+
+  /* ---- Colour: lines -------------------------------------------------- */
+  --line: #e2e7e2;
+  --line-strong: #cdd6cf;
+  --line-faint: #ebefea;
+  --line-inverse: rgba(255, 255, 255, 0.14);
+
+  /* ---- Space ---------------------------------------------------------
+   * 4px base. Every margin, padding and gap uses one of these steps.
+   */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+
+  /* ---- Radius --------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+
+  /* ---- Type scale -----------------------------------------------------
+   * Nine steps, no others. Hierarchy comes from weight and colour as much as
+   * from size.
+   */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 23px;
+  --text-3xl: 28px;
+
+  --leading-tight: 1.25;
+  --leading-snug: 1.45;
+  --leading-normal: 1.65;
+
+  --weight-normal: 400;
+  --weight-medium: 550;
+  --weight-semibold: 650;
+  --weight-bold: 700;
+
+  /* ---- Elevation ------------------------------------------------------
+   * Depth is structural and scarce: only the shell chrome and the single
+   * working panel lift off the canvas.
+   */
+  --shadow-panel:
+    0 1px 2px rgba(26, 36, 31, 0.04), 0 10px 28px rgba(26, 36, 31, 0.07);
+  --shadow-pop:
+    0 2px 6px rgba(26, 36, 31, 0.08), 0 16px 40px rgba(26, 36, 31, 0.13);
+
+  /* ---- Motion --------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 110ms;
+  --dur: 170ms;
+
+  /* ---- Layout --------------------------------------------------------- */
+  --sidebar-width: 232px;
+  --topbar-height: 60px;
+  --content-max: 1180px;
+}
