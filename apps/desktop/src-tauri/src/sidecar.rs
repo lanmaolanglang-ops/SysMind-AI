@@ -397,7 +397,10 @@ struct LauncherCommand {
 
 impl LauncherCommand {
     fn resolve(app: &AppHandle) -> Result<Self, String> {
-        if let Some(program) = std::env::var_os("SYSMIND_BACKEND_EXECUTABLE") {
+        if let Some(program) = development_backend_override(
+            cfg!(debug_assertions),
+            std::env::var_os("SYSMIND_BACKEND_EXECUTABLE").map(PathBuf::from),
+        ) {
             return Ok(Self {
                 program: PathBuf::from(program),
                 prefix_args: Vec::new(),
@@ -428,6 +431,17 @@ impl LauncherCommand {
             program: python,
             prefix_args: vec!["-m".to_string(), "sysmind".to_string()],
         })
+    }
+}
+
+fn development_backend_override(
+    debug_build: bool,
+    override_path: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if debug_build {
+        override_path
+    } else {
+        None
     }
 }
 
@@ -532,5 +546,18 @@ mod tests {
         let path = bundled_backend_path(PathBuf::from("C:/Program Files/SysMind/resources"));
 
         assert!(path.ends_with(PathBuf::from("backend/sysmind-backend.exe")));
+    }
+
+    #[test]
+    fn release_build_ignores_backend_executable_override() {
+        let override_path = PathBuf::from("C:/untrusted/backend.exe");
+        assert_eq!(
+            development_backend_override(false, Some(override_path.clone())),
+            None
+        );
+        assert_eq!(
+            development_backend_override(true, Some(override_path.clone())),
+            Some(override_path)
+        );
     }
 }

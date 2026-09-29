@@ -84,7 +84,9 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     const controller = new AbortController();
     void getRecentScans(client, controller.signal)
-      .then((response) => setScan(response.items[0] ?? null))
+      // A scan started while this request was in flight must not be replaced
+      // by the older history snapshot.
+      .then((response) => setScan((current) => current ?? response.items[0] ?? null))
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(normalizeError(reason));
       });
@@ -94,7 +96,12 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     if (!activeScanId) return;
     const controller = new AbortController();
+    // Only one progress request may be outstanding, so a slow response cannot
+    // land after a newer one and roll the progress backwards.
+    let inFlight = false;
     const timer = window.setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
       void getScan(client, activeScanId, controller.signal)
         .then((next) => {
           setScan(next);
@@ -102,6 +109,9 @@ export function QuickScanPanel({ client }: { client: ApiClient }) {
         })
         .catch((reason: unknown) => {
           if (!controller.signal.aborted) setError(normalizeError(reason));
+        })
+        .finally(() => {
+          inFlight = false;
         });
     }, 350);
     return () => {

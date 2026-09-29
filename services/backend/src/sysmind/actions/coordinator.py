@@ -288,6 +288,16 @@ class ActionCoordinator:
                     error_code="verification_failed",
                     error_message=str(error),
                 )
+            except Exception:
+                # The adapter may have changed the target before failing. Never imply
+                # success or allow the consumed confirmation to be executed again.
+                return self._repository.set_status(
+                    action.id,
+                    status="verification_failed",
+                    updated_at=_now(),
+                    error_code="verification_failed",
+                    error_message="Action outcome could not be verified.",
+                )
 
     def get(self, action_id: str) -> ActionRecord | None:
         return self._repository.get(action_id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import TypeVar, cast
 
@@ -47,7 +48,7 @@ def _run(call: Callable[[], T]) -> T:
 async def candidates(
     request: Request, diagnosis_id: str = Query(min_length=36, max_length=36)
 ) -> CandidateListResponse:
-    items = _run(lambda: _coordinator(request).candidates(diagnosis_id))
+    items = await asyncio.to_thread(_run, lambda: _coordinator(request).candidates(diagnosis_id))
     return CandidateListResponse(items=[candidate_response(item) for item in items])
 
 
@@ -55,13 +56,16 @@ async def candidates(
 async def process_candidates(
     request: Request, diagnosis_id: str = Query(min_length=36, max_length=36)
 ) -> ProcessCandidateListResponse:
-    items = _run(lambda: _coordinator(request).process_candidates(diagnosis_id))
+    items = await asyncio.to_thread(
+        _run, lambda: _coordinator(request).process_candidates(diagnosis_id)
+    )
     return ProcessCandidateListResponse(items=[process_candidate_response(item) for item in items])
 
 
 @router.post("", response_model=ActionResponse, status_code=status.HTTP_201_CREATED)
 async def create_action(payload: CreateActionRequest, request: Request) -> ActionResponse:
-    record = _run(
+    record = await asyncio.to_thread(
+        _run,
         lambda: _coordinator(request).create_disable(
             payload.diagnosis_id, payload.item_id, payload.observed_revision
         )
@@ -73,7 +77,8 @@ async def create_action(payload: CreateActionRequest, request: Request) -> Actio
 async def create_process_close(
     payload: CreateProcessActionRequest, request: Request
 ) -> ActionResponse:
-    record = _run(
+    record = await asyncio.to_thread(
+        _run,
         lambda: _coordinator(request).create_process_close(
             payload.diagnosis_id, payload.item_id, payload.observed_revision
         )
@@ -88,7 +93,9 @@ async def create_process_close(
 )
 async def create_process_termination(close_action_id: str, request: Request) -> ActionResponse:
     return ActionResponse.from_record(
-        _run(lambda: _coordinator(request).create_process_terminate(close_action_id))
+        await asyncio.to_thread(
+            _run, lambda: _coordinator(request).create_process_terminate(close_action_id)
+        )
     )
 
 
@@ -125,7 +132,9 @@ async def execute_action(
     action_id: str, payload: ExecuteActionRequest, request: Request
 ) -> ActionResponse:
     return ActionResponse.from_record(
-        _run(lambda: _coordinator(request).execute(action_id, payload.ticket))
+        await asyncio.to_thread(
+            _run, lambda: _coordinator(request).execute(action_id, payload.ticket)
+        )
     )
 
 
@@ -133,4 +142,6 @@ async def execute_action(
     "/{action_id}/recovery", response_model=ActionResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_recovery(action_id: str, request: Request) -> ActionResponse:
-    return ActionResponse.from_record(_run(lambda: _coordinator(request).create_restore(action_id)))
+    return ActionResponse.from_record(
+        await asyncio.to_thread(_run, lambda: _coordinator(request).create_restore(action_id))
+    )

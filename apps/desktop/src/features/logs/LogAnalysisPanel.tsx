@@ -63,7 +63,9 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     const controller = new AbortController();
     void getRecentLogAnalyses(client, controller.signal)
-      .then((response) => setRecord(response.items[0] ?? null))
+      // An analysis started while this request was in flight must not be
+      // replaced by the older history snapshot.
+      .then((response) => setRecord((current) => current ?? response.items[0] ?? null))
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(errorCopy(reason));
       });
@@ -73,7 +75,12 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     if (!activeId) return;
     const controller = new AbortController();
+    // Only one progress request may be outstanding, so a slow response cannot
+    // land after a newer one and roll the progress backwards.
+    let inFlight = false;
     const timer = window.setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
       void getLogAnalysis(client, activeId, controller.signal)
         .then((next) => {
           setRecord(next);
@@ -81,6 +88,9 @@ export function LogAnalysisPanel({ client }: { client: ApiClient }) {
         })
         .catch((reason: unknown) => {
           if (!controller.signal.aborted) setError(errorCopy(reason));
+        })
+        .finally(() => {
+          inFlight = false;
         });
     }, 350);
     return () => {

@@ -69,8 +69,14 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
     const controller = new AbortController();
     void recentDiagnoses(client, controller.signal)
       .then((result) => {
-        setHistory(result.items);
-        setDiagnosis(result.items[0] ?? null);
+        // Merge rather than replace, and only seed the selection when nothing
+        // is selected yet: a diagnosis started while this request was in
+        // flight must survive the late history response.
+        setHistory((current) => [
+          ...current,
+          ...result.items.filter((item) => !current.some((existing) => existing.id === item.id)),
+        ]);
+        setDiagnosis((current) => current ?? result.items[0] ?? null);
       })
       .catch(() =>
         setMessage({ tone: "warn", text: "暂时无法读取诊断历史，本机服务恢复后会重新加载。" }),
@@ -81,7 +87,12 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
   useEffect(() => {
     if (!activeId) return;
     const controller = new AbortController();
+    // Only one progress request may be outstanding, so a slow response cannot
+    // land after a newer one and roll the progress backwards.
+    let inFlight = false;
     const timer = window.setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
       void getDiagnosis(client, activeId, controller.signal)
         .then((result) => {
           remember(result);
@@ -95,6 +106,9 @@ export function DiagnosisPanel({ client }: { client: ApiClient }) {
               text: "诊断进度暂时不可用，正在等待本地服务恢复。",
             });
           }
+        })
+        .finally(() => {
+          inFlight = false;
         });
     }, 350);
     return () => {

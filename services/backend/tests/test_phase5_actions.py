@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from sysmind.actions import ActionCoordinator, ActionError
+from sysmind.api.dto.actions import ExecuteActionRequest
+from sysmind.api.routes.actions import execute_action
 from sysmind.domain.actions import (
     MutationResult,
     ProcessActionCandidate,
@@ -222,6 +228,67 @@ def test_target_revision_change_fails_closed(tmp_path: Path) -> None:
     )
     result = service.execute(action.id, ticket)
     assert result.status == "target_changed"
+
+
+def test_unexpected_adapter_failure_records_uncertain_action_result(tmp_path: Path) -> None:
+    service, adapter = coordinator(tmp_path)
+    candidate = service.candidates("diagnosis-ready")[0]
+    action = service.create_disable(
+        "diagnosis-ready", candidate.item_id, candidate.observed_revision
+    )
+    _confirmed, ticket, _expires = service.confirm(action.id)
+    assert ticket is not None
+
+    def fail_after_possible_mutation(_item_id: str, _revision: str) -> MutationResult:
+        raise RuntimeError("sensitive adapter failure details")
+
+    adapter.disable = fail_after_possible_mutation  # type: ignore[method-assign]
+    result = service.execute(action.id, ticket)
+
+    assert result.status == "verification_failed"
+    assert result.error_code == "verification_failed"
+    assert "sensitive" not in (result.error_message or "")
+    persisted = service.get(action.id)
+    assert persisted is not None
+    assert persisted.status == "verification_failed"
+    assert persisted.error_code == "verification_failed"
+    with pytest.raises(ActionError) as error:
+        service.execute(action.id, ticket)
+    assert error.value.code == "invalid_action_state"
+
+
+def test_action_execution_does_not_block_other_api_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, adapter = coordinator(tmp_path)
+    candidate = service.candidates("diagnosis-ready")[0]
+    action = service.create_disable(
+        "diagnosis-ready", candidate.item_id, candidate.observed_revision
+    )
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_execute(_action_id: str, _ticket: str) -> object:
+        entered.set()
+        release.wait(0.25)
+        return action
+
+    monkeypatch.setattr(service, "execute", slow_execute)
+    request = Request(
+        {"type": "http", "app": SimpleNamespace(state=SimpleNamespace(action_coordinator=service))}
+    )
+
+    async def check() -> bool:
+        task = asyncio.create_task(
+            execute_action(action.id, ExecuteActionRequest(ticket="t" * 64), request)
+        )
+        await asyncio.sleep(0.05)
+        responsive = entered.is_set() and not task.done()
+        release.set()
+        await task
+        return responsive
+
+    assert asyncio.run(check())
 
 
 def test_diagnosis_without_startup_evidence_is_rejected(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiClient } from "../../services/api-client";
@@ -94,5 +94,39 @@ describe("QuickScanPanel", () => {
         screen.getAllByRole("status").some((element) => element.textContent === "扫描已取消"),
       ).toBe(true);
     });
+  });
+
+  it("does not overlap progress requests when the backend is slow", async () => {
+    const api = client();
+    const get = vi.spyOn(api, "get")
+      .mockResolvedValueOnce({ items: [record("running")] })
+      .mockImplementation(() => new Promise(() => {}));
+
+    render(<QuickScanPanel client={api} />);
+    await screen.findByRole("button", { name: /取消扫描/ });
+    await new Promise((resolve) => window.setTimeout(resolve, 850));
+
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a newly started scan when its older history response arrives late", async () => {
+    const api = client();
+    let resolveHistory: (value: { items: ScanRecord[] }) => void = () => {};
+    const history = new Promise<{ items: ScanRecord[] }>((resolve) => {
+      resolveHistory = resolve;
+    });
+    vi.spyOn(api, "get").mockReturnValueOnce(history).mockImplementation(() => new Promise(() => {}));
+    vi.spyOn(api, "post").mockResolvedValue(record("running"));
+
+    render(<QuickScanPanel client={api} />);
+    fireEvent.click(screen.getByRole("button", { name: /开始扫描/ }));
+    await screen.findByRole("button", { name: /取消扫描/ });
+
+    await act(async () => {
+      resolveHistory({ items: [{ ...record("completed"), id: "scan-old" }] });
+      await history;
+    });
+
+    expect(screen.getByRole("button", { name: /取消扫描/ })).toBeInTheDocument();
   });
 });

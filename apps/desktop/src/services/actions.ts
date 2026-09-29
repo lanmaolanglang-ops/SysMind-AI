@@ -97,5 +97,7 @@ export async function confirmAndExecute(client: ApiClient, action: ControlledAct
   return client.postJson<ControlledAction, { ticket: string }>(
     `/api/v1/actions/${action.id}/execute`,
     { ticket: consent.ticket },
+    undefined,
+    12_000,
   );
 }

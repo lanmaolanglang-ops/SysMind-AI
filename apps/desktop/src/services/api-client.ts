@@ -55,8 +55,13 @@ export class ApiClient {
     return this.#request<T>("POST", path, signal);
   }
 
-  async postJson<T, TBody>(path: string, body: TBody, signal?: AbortSignal): Promise<T> {
-    return this.#request<T>("POST", path, signal, body);
+  async postJson<T, TBody>(
+    path: string,
+    body: TBody,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<T> {
+    return this.#request<T>("POST", path, signal, body, timeoutMs);
   }
 
   async download(path: string, signal?: AbortSignal): Promise<Blob> {
@@ -115,7 +120,9 @@ export class ApiClient {
     let buffer = "";
     while (true) {
       const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done }).replaceAll("\r\n", "\n");
+      buffer += decoder.decode(value, { stream: !done });
+      // Normalize after appending: a CRLF pair may arrive in separate chunks.
+      buffer = buffer.replaceAll("\r\n", "\n");
       let boundary = buffer.indexOf("\n\n");
       while (boundary >= 0) {
         const block = buffer.slice(0, boundary);
@@ -133,8 +140,9 @@ export class ApiClient {
     path: string,
     signal?: AbortSignal,
     body?: unknown,
+    timeoutMs?: number,
   ): Promise<T> {
-    const timeout = AbortSignal.timeout(this.#timeoutMs);
+    const timeout = AbortSignal.timeout(timeoutMs ?? this.#timeoutMs);
     const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const correlationId = crypto.randomUUID();
 

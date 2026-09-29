@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClient } from "./api-client";
+import { confirmAndExecute, type ControlledAction } from "./actions";
 
 describe("ApiClient", () => {
   afterEach(() => {
@@ -121,6 +122,35 @@ describe("ApiClient", () => {
     expect(request.headers).toMatchObject({ "Last-Event-ID": "6" });
   });
 
+  it("parses SSE frames when CRLF separators cross stream chunks", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("id: 8\r"));
+        controller.enqueue(encoder.encode("\nevent: task.status\r"));
+        controller.enqueue(encoder.encode('\ndata: {"status":"completed"}\r'));
+        controller.enqueue(encoder.encode("\n\r"));
+        controller.enqueue(encoder.encode("\n"));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(stream, { status: 200 })),
+    );
+    const client = new ApiClient({
+      baseUrl: "http://127.0.0.1:45000",
+      sessionToken: "temporary-session",
+    });
+    const events: Array<{ id: string | null; event: string; data: { status: string } }> = [];
+
+    await client.streamSse<{ status: string }>("/api/v1/tasks/task-1/events", (event) =>
+      events.push(event),
+    );
+
+    expect(events).toEqual([{ id: "8", event: "task.status", data: { status: "completed" } }]);
+  });
+
   it("downloads reports with the in-memory session header", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("# report", { status: 200, headers: { "Content-Type": "text/markdown" } }),
@@ -134,5 +164,36 @@ describe("ApiClient", () => {
     await expect(client.download("/api/v1/diagnoses/d-1/export?format=markdown")).resolves.toBeInstanceOf(Blob);
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(request.headers).toMatchObject({ "X-SysMind-Session": "temporary-session" });
+  });
+
+  it("waits through the bounded process close before timing out its execution request", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    const action: ControlledAction = {
+      id: "action-1",
+      diagnosis_id: "diagnosis-1",
+      tool_name: "process.request_close_current_user",
+      target_name: "Editor",
+      source_kind: "current_user_process",
+      status: "proposed",
+      recovery_available: false,
+      error_code: null,
+      error_message: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ action, ticket: "ticket" })))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ...action, status: "close_pending" }))),
+    );
+    const client = new ApiClient({
+      baseUrl: "http://127.0.0.1:45000",
+      sessionToken: "temporary-session",
+    });
+
+    await expect(confirmAndExecute(client, action)).resolves.toMatchObject({
+      status: "close_pending",
+    });
+    expect(timeoutSpy).toHaveBeenLastCalledWith(12_000);
+    timeoutSpy.mockRestore();
   });
 });

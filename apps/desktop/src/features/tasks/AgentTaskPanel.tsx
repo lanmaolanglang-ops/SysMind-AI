@@ -80,7 +80,9 @@ export function AgentTaskPanel({ client }: { client: ApiClient }) {
     ])
       .then(([catalog, recent]) => {
         setTools(catalog.items);
-        setTask(recent.items[0] ?? null);
+        // A task started while this request was in flight must not be replaced
+        // by the older history snapshot.
+        setTask((current) => current ?? recent.items[0] ?? null);
       })
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setError(errorCopy(reason));

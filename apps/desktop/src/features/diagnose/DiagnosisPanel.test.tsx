@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiClient } from "../../services/api-client";
@@ -126,5 +126,28 @@ describe("DiagnosisPanel", () => {
     expect(screen.getByRole("button", { name: "有帮助" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "有帮助" }));
     expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the new diagnosis selected while late history is merged", async () => {
+    const client = api();
+    let resolveHistory: (value: { items: Diagnosis[] }) => void = () => {};
+    const history = new Promise<{ items: Diagnosis[] }>((resolve) => {
+      resolveHistory = resolve;
+    });
+    vi.spyOn(client, "get").mockReturnValueOnce(history);
+    vi.spyOn(client, "postJson").mockResolvedValue(report("diagnosis-new"));
+
+    render(<DiagnosisPanel client={client} />);
+    fireEvent.click(screen.getByRole("button", { name: /开始诊断/ }));
+    const selector = await screen.findByRole<HTMLSelectElement>("combobox");
+    expect(selector.value).toBe("diagnosis-new");
+
+    await act(async () => {
+      resolveHistory({ items: [report("diagnosis-old")] });
+      await history;
+    });
+
+    expect(selector.value).toBe("diagnosis-new");
+    expect(selector.options).toHaveLength(2);
   });
 });
