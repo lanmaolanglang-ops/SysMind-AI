@@ -34,6 +34,56 @@ export interface ControlledAction {
   error_message: string | null;
 }
 
+/**
+ * Reads the recorded controlled actions. The endpoint returns the most recent
+ * actions first (`created_at` descending), which the restore helper relies on.
+ */
+export function recentControlledActions(client: ApiClient) {
+  return client.get<{ items: ControlledAction[] }>("/api/v1/actions");
+}
+
+export function getControlledAction(client: ApiClient, actionId: string) {
+  return client.get<ControlledAction>(`/api/v1/actions/${actionId}`);
+}
+
+export interface RestoredControlledActions {
+  /** The action whose outcome the panel should show, if any. */
+  action: ControlledAction | null;
+  /** The succeeded disable that still owns an unconsumed recovery record. */
+  original: ControlledAction | null;
+}
+
+/**
+ * Rebuilds the controlled-action surface from the backend record so the
+ * outcome and the recovery entry point survive a remount.
+ *
+ * Recovery availability is a backend fact, not a client one: the API reports
+ * `recovery_available` only while a succeeded disable still has a recovery
+ * record, and clears it once that recovery is consumed.
+ *
+ * Actions are expected in backend order (most recent first).
+ */
+export function restoreControlledActions(
+  actions: readonly ControlledAction[],
+  diagnosisId: string,
+): RestoredControlledActions {
+  const forDiagnosis = actions.filter((item) => item.diagnosis_id === diagnosisId);
+
+  // A rejected action returns the panel to the candidate list while mounted,
+  // so it is not restored as a result.
+  const action = forDiagnosis.find((item) => item.status !== "rejected") ?? null;
+
+  const original =
+    forDiagnosis.find(
+      (item) =>
+        item.tool_name === "startup.disable_current_user" &&
+        item.status === "succeeded" &&
+        item.recovery_available,
+    ) ?? null;
+
+  return { action, original };
+}
+
 export function actionCandidates(client: ApiClient, diagnosisId: string) {
   return client.get<{ items: StartupActionCandidate[] }>(
     `/api/v1/actions/candidates?diagnosis_id=${encodeURIComponent(diagnosisId)}`,

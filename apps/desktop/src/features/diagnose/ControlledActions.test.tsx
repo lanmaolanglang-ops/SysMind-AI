@@ -8,6 +8,14 @@ function api() {
   return new ApiClient({ baseUrl: "http://127.0.0.1:45000", sessionToken: "test-token" });
 }
 
+/** Routes GETs by path. The recorded-action read defaults to empty. */
+function routeGet(candidates: { items: unknown[] }, actions: unknown[] = []) {
+  return ((path: string) =>
+    Promise.resolve(
+      path === "/api/v1/actions" ? { items: actions } : candidates,
+    )) as never;
+}
+
 const proposed = {
   id: "action-1",
   diagnosis_id: "diagnosis-1",
@@ -23,10 +31,12 @@ const proposed = {
 describe("ControlledActions", () => {
   it("shows exact impact and waits for a separate explicit confirmation", async () => {
     const client = api();
-    vi.spyOn(client, "get").mockResolvedValue({
-      items: [{ item_id: "a".repeat(64), name: "Example", source_kind: "user_run",
-        command_name: "example.exe", observed_revision: "b".repeat(64) }],
-    });
+    vi.spyOn(client, "get").mockImplementation(
+      routeGet({
+        items: [{ item_id: "a".repeat(64), name: "Example", source_kind: "user_run",
+          command_name: "example.exe", observed_revision: "b".repeat(64) }],
+      }),
+    );
     const post = vi.spyOn(client, "post").mockResolvedValue({
       action: { ...proposed, status: "confirmed" }, ticket: "ticket", expires_at: "soon",
     });
@@ -47,13 +57,42 @@ describe("ControlledActions", () => {
     expect(screen.getByRole("button", { name: "生成恢复计划" })).toBeInTheDocument();
   });
 
+  it("restores a recorded outcome and offers recovery only while the backend allows it", async () => {
+    const client = api();
+    vi.spyOn(client, "get").mockImplementation(
+      routeGet({ items: [] }, [
+        { ...proposed, status: "succeeded", recovery_available: true },
+      ]),
+    );
+    const { unmount } = render(
+      <ControlledActions client={client} diagnosisId="diagnosis-1" />,
+    );
+
+    expect(await screen.findByText("启动项已禁用并验证")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成恢复计划" })).toBeInTheDocument();
+
+    // A fresh mount with the recovery already consumed must not re-offer it.
+    unmount();
+    vi.spyOn(client, "get").mockImplementation(
+      routeGet({ items: [] }, [
+        { ...proposed, status: "succeeded", recovery_available: false },
+      ]),
+    );
+    render(<ControlledActions client={client} diagnosisId="diagnosis-1" />);
+
+    expect(await screen.findByText("启动项已禁用并验证")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "生成恢复计划" })).not.toBeInTheDocument();
+  });
+
   it("never escalates a pending GUI close request to forced termination", async () => {
     const client = api();
-    vi.spyOn(client, "get").mockResolvedValue({
-      items: [{ item_id: "c".repeat(64), name: "Editor.exe",
-        source_kind: "current_user_process", command_name: "editor.exe",
-        observed_revision: "d".repeat(64), cpu_percent: 41, memory_percent: 8 }],
-    });
+    vi.spyOn(client, "get").mockImplementation(
+      routeGet({
+        items: [{ item_id: "c".repeat(64), name: "Editor.exe",
+          source_kind: "current_user_process", command_name: "editor.exe",
+          observed_revision: "d".repeat(64), cpu_percent: 41, memory_percent: 8 }],
+      }),
+    );
     const processAction = {
       ...proposed,
       id: "process-action",

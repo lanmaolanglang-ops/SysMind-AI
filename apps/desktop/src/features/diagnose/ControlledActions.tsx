@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ApiClient } from "../../services/api-client";
 import { Button } from "../../ui/Button";
@@ -11,7 +11,9 @@ import {
   createProcessTermination,
   createRecoveryAction,
   processActionCandidates,
+  recentControlledActions,
   rejectAction,
+  restoreControlledActions,
   type ControlledAction,
   type ProcessActionCandidate,
   type StartupActionCandidate,
@@ -25,15 +27,43 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const engaged = useRef(false);
+
+  /** Marks that the user has taken over, so the restore cannot overwrite them. */
+  const engage = () => {
+    engaged.current = true;
+  };
+
+  // The panel is unmounted while another section is open, so the outcome of an
+  // executed action is restored from the backend record rather than from
+  // component state that no longer exists.
   useEffect(() => {
+    let active = true;
+    engaged.current = false;
     setCandidates(null);
     setAction(null);
     setProcesses(null);
     setOriginal(null);
     setMessage(null);
-  }, [diagnosisId]);
+
+    void recentControlledActions(client)
+      .then((response) => {
+        if (!active || engaged.current) return;
+        const restored = restoreControlledActions(response.items, diagnosisId);
+        setAction((current) => current ?? restored.action);
+        setOriginal((current) => current ?? restored.original);
+      })
+      .catch(() => {
+        if (active) setMessage("暂时无法读取此前的受控操作记录，可稍后重试。");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [client, diagnosisId]);
 
   const load = () => {
+    engage();
     setBusy(true);
     void actionCandidates(client, diagnosisId)
       .then((result) => setCandidates(result.items))
@@ -42,6 +72,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   };
 
   const loadProcesses = () => {
+    engage();
     setBusy(true);
     void processActionCandidates(client, diagnosisId)
       .then((result) => setProcesses(result.items))
@@ -50,6 +81,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   };
 
   const plan = (candidate: StartupActionCandidate) => {
+    engage();
     setBusy(true);
     void createDisableAction(client, diagnosisId, candidate)
       .then((result) => {
@@ -61,6 +93,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
   };
 
   const planProcess = (candidate: ProcessActionCandidate) => {
+    engage();
     setBusy(true);
     void createProcessCloseAction(client, diagnosisId, candidate)
       .then((result) => {
@@ -73,6 +106,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
 
   const execute = () => {
     if (!action) return;
+    engage();
     setBusy(true);
     void confirmAndExecute(client, action)
       .then((result) => {
@@ -87,6 +121,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
 
   const prepareRecovery = () => {
     if (!original) return;
+    engage();
     setBusy(true);
     void createRecoveryAction(client, original.id)
       .then((result) => {
@@ -99,6 +134,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
 
   const prepareTermination = () => {
     if (!action || action.status !== "close_pending") return;
+    engage();
     setBusy(true);
     void createProcessTermination(client, action.id)
       .then((result) => {
@@ -111,6 +147,7 @@ export function ControlledActions({ client, diagnosisId }: { client: ApiClient; 
 
   const reject = () => {
     if (!action) return;
+    engage();
     setBusy(true);
     void rejectAction(client, action.id)
       .then(() => setAction(null))
